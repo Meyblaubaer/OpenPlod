@@ -114,7 +114,7 @@ The [1.0.0 roadmap](ROADMAP.md) expands OpenPlod into a multi-provider transcrip
 
 - **0.5:** OpenAI and AssemblyAI speech-to-text, stronger Mistral/Deepgram/local Whisper controls, and separate cloud/local AI choices for transcript analysis.
 - **0.6:** Transcript Studio with reviewed AI cleanup, translation, version comparison, chapters, reusable document templates, and subtitle exports.
-- **0.7:** Linked Markdown knowledge, managed Obsidian export, richer source-linked chat, and expanded API/MCP automation.
+- **0.7:** Linked Markdown knowledge, managed Obsidian export, richer source-linked chat, and expanded API/MCP automation. The [0.7.0 Sprint 1 plan](docs/sprint-0.7.0.md) covers document tags and backlinks plus a versioned job API and read-only MCP job/source tools.
 - **0.8:** Resumable Android uploads, offline synchronization, pairing management, and validated direct-device recovery.
 - **0.9 -> 1.0:** Fresh-owner Plaud onboarding, backup/restore, privacy hardening, performance validation, and signed releases.
 

@@ -110,6 +110,12 @@ Use a separate analysis adapter contract. A provider supporting text analysis is
 
 ## 0.7.0 - Knowledge, Chat, and Automation
 
+> **Sprint 1 (planned, 2026-09-22 to 2026-10-05).** See the [0.7.0 Sprint 1 plan](docs/sprint-0.7.0.md).
+> It commits KB-01 (document tags, properties, and resolved transcript-version backlinks),
+> KB-06 (a versioned processing-job API over the existing queue), and KB-07 (read-only MCP
+> source/version and job-status tools). KB-02, KB-04, KB-05, KB-08, KB-09, and KB-10 are
+> deferred. No checkbox below is marked complete by the sprint alone.
+
 - [ ] **KB-01:** Add document properties, document tags, recording collections, saved views, and backlinks between documents and exact transcript versions.
 - [ ] **KB-02:** Add managed Markdown export to a chosen filesystem/Obsidian folder, with attachments, source links, collision detection, and an export manifest. Start one-way; never overwrite externally edited files silently.
 - [ ] **KB-03:** Extend the existing cited chat with conversation rename/archive, project context, pinned sources, follow-up questions, and complete-conversation export.
