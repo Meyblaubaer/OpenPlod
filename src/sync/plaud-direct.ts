@@ -132,6 +132,11 @@ export async function importDirectPlaudRecording(sessionId: number) {
         }), { mode: 0o600 });
       }
       await unlink(resumePath).catch(() => undefined);
+      // Like every other import path, honour "Transcribe after import" (or forwarding) for new recordings.
+      // Imported lazily: the job queue opens the vault database on load.
+      if (result.added) await import('../library/processing')
+        .then(({ queueRecordingProcessing }) => queueRecordingProcessing({ recordingId: result.recording.id, filePath: result.recording.filePath }))
+        .catch(error => console.error('[Plaud] Imported recording could not be queued for processing:', error));
       return { ...result, durationMs: Math.round(duration * 1000), sourceRetained: true };
     } finally {
       for (const path of [encryptedPath, oggPath, playbackPath]) await unlink(path).catch(() => undefined);

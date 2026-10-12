@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle, Check, Download, FileText, History, Loader2, Plus, Search, Sparkles, Speech, Trash2,
   Undo2, Wand2,
 } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import {
-  api, type CleanupProposal, type CustomAction, type CustomActionResult, type Recording,
-  type StudioSegment, type TranscriptDiff, type TranscriptStructure, type TranscriptVersionRow,
+  api, speakerLabel, type CleanupProposal, type CustomAction, type CustomActionResult, type Recording,
+  type StudioSegment, type TranscriptDiff, type TranscriptStructure, type TranscriptVersion,
   type TranslationProposal, type VersionComparison,
 } from '@/lib/api'
 import './transcript-studio.css'
@@ -57,7 +57,8 @@ function DiffView({ diff }: { diff: TranscriptDiff }) {
   )
 }
 
-export function TranscriptStudio({ recording, onChanged }: { recording: Recording; onChanged: () => Promise<void> | void }) {
+// Memoized: the recording page re-renders on every playback tick, and the Studio does not depend on the clock.
+export const TranscriptStudio = memo(function TranscriptStudio({ recording, onChanged }: { recording: Recording; onChanged: () => Promise<void> | void }) {
   const [tab, setTab] = useState<'edit' | 'versions' | 'ai' | 'structure' | 'actions'>('edit')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
@@ -67,7 +68,7 @@ export function TranscriptStudio({ recording, onChanged }: { recording: Recordin
 
   const segments: StudioSegment[] = useMemo(
     () => (recording.segments ?? []).map(segment => ({
-      start: segment.startTime, end: segment.endTime, text: segment.text, speaker: segment.speaker,
+      start: segment.startTime, end: segment.endTime, text: segment.text, speaker: segment.speakerId,
     })),
     [recording.segments],
   )
@@ -123,7 +124,7 @@ export function TranscriptStudio({ recording, onChanged }: { recording: Recordin
         )}
     </section>
   )
-}
+})
 
 type Runner = (key: string, action: () => Promise<string | void>) => Promise<void>
 
@@ -172,7 +173,7 @@ function EditPanel({ recording, speakers, segments, busy, run, onChanged }: {
           <label className="tstudio-field tstudio-field--inline"><span>Only speaker</span>
             <select value={scope} onChange={event => setScope(event.target.value)}>
               <option value="">All speakers</option>
-              {speakers.map(speaker => <option key={String(speaker)} value={String(speaker)}>{String(speaker)}</option>)}
+              {speakers.map(speaker => <option key={String(speaker)} value={String(speaker)}>{speakerLabel(speaker)}</option>)}
             </select>
           </label>
         )}
@@ -211,7 +212,7 @@ function EditPanel({ recording, speakers, segments, busy, run, onChanged }: {
               <label className="tstudio-field"><span>Rename</span>
                 <select value={renameFrom} onChange={event => setRenameFrom(event.target.value)}>
                   <option value="">Choose a speaker</option>
-                  {speakers.map(speaker => <option key={String(speaker)} value={String(speaker)}>{String(speaker)}</option>)}
+                  {speakers.map(speaker => <option key={String(speaker)} value={String(speaker)}>{speakerLabel(speaker)}</option>)}
                 </select>
               </label>
               <label className="tstudio-field"><span>To</span>
@@ -301,7 +302,7 @@ function EditPanel({ recording, speakers, segments, busy, run, onChanged }: {
       <div className="tstudio-actions">
         <Button variant="outline" size="sm" disabled={Boolean(busy)}
           onClick={() => void run('undo', async () => {
-            const versions = await api.transcriptVersions(recording.id)
+            const versions = await api.getTranscriptVersions(recording.id)
             const currentIndex = versions.findIndex(version => version.id === recording.transcriptVersionId)
             // Versions come back newest first, so the one after the current is its predecessor.
             const previous = currentIndex === -1 ? versions[1] : versions[currentIndex + 1]
@@ -326,7 +327,7 @@ function EditPanel({ recording, speakers, segments, busy, run, onChanged }: {
 function VersionsPanel({ recording, busy, run, onChanged }: {
   recording: Recording; busy: string; run: Runner; onChanged: () => Promise<void> | void
 }) {
-  const [versions, setVersions] = useState<TranscriptVersionRow[] | null>(null)
+  const [versions, setVersions] = useState<TranscriptVersion[] | null>(null)
   const [before, setBefore] = useState('')
   const [after, setAfter] = useState('')
   const [comparison, setComparison] = useState<VersionComparison | null>(null)
@@ -334,7 +335,7 @@ function VersionsPanel({ recording, busy, run, onChanged }: {
 
   useEffect(() => {
     let active = true
-    api.transcriptVersions(recording.id)
+    api.getTranscriptVersions(recording.id)
       .then(rows => { if (!active) return; setVersions(rows); setBefore(rows[1]?.id ?? ''); setAfter(rows[0]?.id ?? '') })
       .catch(failure => { if (active) setLoadError(message(failure)) })
     return () => { active = false }
@@ -344,7 +345,7 @@ function VersionsPanel({ recording, busy, run, onChanged }: {
   if (!versions) return <p className="tstudio-empty">Loading versions…</p>
   if (versions.length === 0) return <p className="tstudio-empty">This transcript has no saved versions yet.</p>
 
-  const label = (version: TranscriptVersionRow) =>
+  const label = (version: TranscriptVersion) =>
     `${version.origin} · ${new Date(version.createdAt).toLocaleString()}`
 
   return (

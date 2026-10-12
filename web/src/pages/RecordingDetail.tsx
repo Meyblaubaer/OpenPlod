@@ -41,7 +41,7 @@ import { activeWordIndex, followedSegmentIndex, hasWordTiming } from '@/lib/tran
 import { TranscribeDialog } from '@/components/TranscribeDialog'
 import { RecordingBookmarks } from '@/components/RecordingBookmarks'
 import { SegmentEditor } from '@/components/SegmentEditor'
-import { api, type Recording, type TranscriptSegment, type TranscriptVersion } from '@/lib/api'
+import { api, speakerLabel, type Recording, type TranscriptSegment, type TranscriptVersion } from '@/lib/api'
 import { formatDuration } from '@/lib/utils'
 import { exportDocument, exportOriginalAudio, recordingMarkdown, safeDocumentName as safeName } from '@/lib/document-export'
 import { deviceCommand, supportsPlaudDevice, vaultArguments } from '@/lib/plaud-device'
@@ -95,24 +95,35 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
   const audioRef = useRef<HTMLAudioElement>(null)
   const audioKey = recording ? recording.fingerprint || recording.filePath : null
 
-  const loadRecording = useCallback(async () => {
+  // Only the newest request may update the page, so a slow response for a
+  // recording the user already left never lands under another one's URL.
+  const loadTicket = useRef(0)
+  const lastVersionId = useRef<string | null | undefined>(undefined)
+  const loadRecording = useCallback(async (withVersions = true) => {
     if (!id) return
+    const ticket = ++loadTicket.current
     setError('')
     try {
-      const [nextRecording, nextVersions] = await Promise.all([
-        api.getRecording(id),
-        api.getTranscriptVersions(id),
-      ])
+      const nextRecording = await api.getRecording(id)
+      // Polls skip the version list (every version's full text) unless the current version moved.
+      const nextVersions = withVersions || nextRecording.transcriptVersionId !== lastVersionId.current
+        ? await api.getTranscriptVersions(id) : null
+      if (ticket !== loadTicket.current) return
+      lastVersionId.current = nextRecording.transcriptVersionId
       setRecording(nextRecording)
-      setVersions(nextVersions)
+      if (nextVersions) setVersions(nextVersions)
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Could not load recording')
+      if (ticket === loadTicket.current) setError(loadError instanceof Error ? loadError.message : 'Could not load recording')
     } finally {
-      setLoading(false)
+      if (ticket === loadTicket.current) setLoading(false)
     }
   }, [id])
 
-  useEffect(() => { void loadRecording() }, [loadRecording])
+  useEffect(() => {
+    setRecording(null); setVersions([]); setSelectedVersion(null); setLoading(true)
+    lastVersionId.current = undefined
+    void loadRecording()
+  }, [loadRecording])
   useEffect(() => {
     const version = searchParams.get('version')
     if (version) setSelectedVersion(versions.find(v => v.id === version) ?? null)
@@ -123,18 +134,21 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
     try {
       const raw = typeof selectedVersion.segments === 'string' ? JSON.parse(selectedVersion.segments) : selectedVersion.segments
       if (!Array.isArray(raw)) return []
-      return raw.filter(s => Number.isFinite(s.start) && Number.isFinite(s.end) && s.end >= s.start).map((s, i) => ({ id: `s${i}`, text: s.text, startTime: s.start, endTime: s.end, speaker: typeof s.speaker === 'string' ? s.speaker : `Speaker ${s.speaker ?? ''}` }))
+      return raw.filter(s => Number.isFinite(s.start) && Number.isFinite(s.end) && s.end >= s.start).map((s, i) => ({ id: `s${i}`, text: s.text, startTime: s.start, endTime: s.end, speaker: speakerLabel(s.speaker), speakerId: s.speaker ?? null }))
     } catch { return [] }
   }, [selectedVersion, recording?.segments])
 
   /** True only when a provider genuinely returned per-word timings. */
   const wordTiming = useMemo(() => hasWordTiming(displaySegments), [displaySegments])
 
+  // A recording can sit in `pending` indefinitely when automatic transcription
+  // is off, so that state is polled slowly; active work is polled quickly.
+  const status = recording?.status
   useEffect(() => {
-    if (!recording || !['pending', 'transcribing', 'summarizing'].includes(recording.status)) return
-    const poll = window.setInterval(() => void loadRecording(), 2500)
+    if (!status || !['pending', 'transcribing', 'summarizing'].includes(status)) return
+    const poll = window.setInterval(() => void loadRecording(false), status === 'pending' ? 15000 : 2500)
     return () => window.clearInterval(poll)
-  }, [loadRecording, recording])
+  }, [loadRecording, status])
 
   useEffect(() => {
     if (!id || !audioKey) return
@@ -153,16 +167,25 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
     }
   }, [id, audioKey])
 
+  // Re-seed drafts only when the saved recording actually changed, so a status
+  // poll does not wipe what the user is typing.
+  const seedKey = recording ? `${recording.id}:${recording.revision}:${recording.transcriptVersionId ?? ''}` : ''
+  const seededFrom = useRef('')
   useEffect(() => {
-    if (!recording) return
+    if (!recording || seededFrom.current === seedKey) return
+    seededFrom.current = seedKey
     setTitleDraft(recording.title)
     setContextDraft(recording.context ?? '')
     setNotesDraft(recording.notes ?? '')
     setTagsDraft(recording.tags.join(', '))
     setTranscriptDraft(recording.transcriptText ?? '')
-  }, [recording])
+  }, [recording, seedKey])
 
   const displayText = selectedVersion?.fullText ?? recording?.transcriptText ?? ''
+  // Playback updates the clock several times a second; parse Markdown only when the text changes.
+  const transcriptMarkdown = useMemo(() => <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayText}</ReactMarkdown>, [displayText])
+  const summary = recording?.summary
+  const summaryMarkdown = useMemo(() => summary ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{summary}</ReactMarkdown> : null, [summary])
   const sourceLabel = recording?.sourceProvider === 'plaud'
     ? 'Plaud Note Pro'
     : recording?.sourceProvider === 'opennotes' ? 'OpenPlod mobile' : 'Local import'
@@ -450,7 +473,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
                 </>
               ) : displayText ? <p className="p-6 text-sm text-muted-foreground">This transcript version has no timestamp data. Its text is available in Markdown.</p> : <TranscriptEmpty action={action} onTranscribe={() => void runAction('transcribing')} />
             ) : displayText ? (
-              <div className="markdown-document"><ReactMarkdown remarkPlugins={[remarkGfm]}>{displayText}</ReactMarkdown></div>
+              <div className="markdown-document">{transcriptMarkdown}</div>
             ) : <TranscriptEmpty action={action} onTranscribe={() => void runAction('transcribing')} />}
           </article>
         </main>
@@ -477,13 +500,13 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
             <label className="replace-audio"><Upload />Replace original audio<input type="file" accept="audio/*" onChange={event => {
               const file = event.target.files?.[0]
               if (!file) return
-              void api.replaceAudio(recording.id, file, recording.revision).then(loadRecording).catch(replaceError => setError(replaceError instanceof Error ? replaceError.message : 'Could not replace audio'))
+              void api.replaceAudio(recording.id, file, recording.revision).then(() => loadRecording()).catch(replaceError => setError(replaceError instanceof Error ? replaceError.message : 'Could not replace audio'))
             }} /></label>
           </section>
 
           <section>
             <div className="inspector-heading"><span>Summary</span><AlignLeft /></div>
-            {recording.summary ? <div className="inspector-summary"><ReactMarkdown remarkPlugins={[remarkGfm]}>{recording.summary}</ReactMarkdown></div> : (
+            {recording.summary ? <div className="inspector-summary">{summaryMarkdown}</div> : (
               <div className="inspector-empty"><p>No summary yet.</p><Button variant="outline" size="sm" onClick={() => void runAction('summarizing')} disabled={action !== null}>{action === 'summarizing' ? <Loader2 className="animate-spin" /> : <AlignLeft />}Generate</Button></div>
             )}
           </section>

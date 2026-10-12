@@ -3,7 +3,10 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { toFtsQuery } from '../search/query';
 import { createFolderSchema, updateFolderSchema, createNoteSchema, updateNoteSchema, snapshotSchema, noteListSchema, identifier, revision } from './schemas';
-import type { NoteFolder, NoteDocument, NoteSummary, NoteVersion, NotePage } from './types';
+import type {
+  NoteFolder, NoteDocument, NoteSummary, NoteVersion, NotePage, NoteProperties, DocumentSource,
+  TranscriptVersionSummary, TranscriptVersionDetail, TranscriptVersionBacklinks,
+} from './types';
 
 export class OrganizerError extends Error {
   constructor(readonly status: 400 | 404 | 409 | 410 | 413 | 503, readonly code: string, message: string) { super(message); }
@@ -12,8 +15,35 @@ const fail = (status: OrganizerError['status'], code: string, message: string): 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const fields = `d.id, d.title, d.folder_id AS folderId, d.starred, d.revision,
   substr(d.content, 1, 160) AS excerpt, d.created_at AS createdAt, d.updated_at AS updatedAt, d.deleted_at AS deletedAt,
-  d.source_recording_id AS sourceRecordingId, d.source_version_id AS sourceVersionId, d.source_origin AS sourceOrigin`;
-const normalize = <T extends NoteSummary>(row: T): T => ({ ...row, starred: Boolean(row.starred) });
+  d.source_recording_id AS sourceRecordingId, d.source_version_id AS sourceVersionId, d.source_origin AS sourceOrigin,
+  (SELECT json_group_array(t.tag) FROM note_tags t WHERE t.document_id=d.id) AS tags`;
+/** SQLite returns flags as integers and tags/properties as JSON text. */
+const normalize = <T extends NoteSummary>(row: T): T => {
+  const raw = row as unknown as { tags: string; properties?: string };
+  return {
+    ...row, starred: Boolean(row.starred), tags: (JSON.parse(raw.tags) as string[]).sort(compareTags),
+    ...(raw.properties === undefined ? {} : { properties: JSON.parse(raw.properties) as NoteProperties }),
+  };
+};
+const compareTags = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' });
+const tagKey = (tag: string) => tag.toLocaleLowerCase();
+/** Trim, drop case-insensitive duplicates (first spelling wins), and sort. */
+const uniqueTags = (tags: string[]) => {
+  const seen = new Map<string, string>();
+  for (const tag of tags) if (!seen.has(tagKey(tag))) seen.set(tagKey(tag), tag);
+  return [...seen.values()].sort(compareTags);
+};
+/** Merge a properties patch: present keys replace, `null` removes, absent keys are kept. */
+const mergeProperties = (current: NoteProperties, patch: NoteProperties) => {
+  const next = { ...current };
+  for (const [key, value] of Object.entries(patch)) { if (value === null) delete next[key]; else next[key] = value; }
+  return next;
+};
+const versionColumns = `v.id, v.recording_id AS recordingId, v.origin, v.created_at AS createdAt,
+  json_extract(v.provenance, '$.provider') AS provider, json_extract(v.provenance, '$.model') AS model,
+  (v.id = t.current_version_id) AS current,
+  (SELECT count(*) FROM note_documents d WHERE d.source_recording_id=v.recording_id AND d.source_version_id=v.id AND d.deleted_at IS NULL) AS documentCount`;
+const normalizeVersion = <T extends TranscriptVersionSummary>(row: T): T => ({ ...row, current: Boolean(row.current) });
 
 export function initializeOrganizer(database: Database) {
   database.exec(`
@@ -59,6 +89,17 @@ export function initializeOrganizer(database: Database) {
   `);
   const generationColumns = database.query('PRAGMA table_info(note_generations)').all() as { name: string }[];
   if (!generationColumns.some(column => column.name === 'provider')) database.exec("ALTER TABLE note_generations ADD COLUMN provider TEXT NOT NULL DEFAULT 'mistral'");
+  // 0.7.0 (KB-01): additive tags, properties, and a source index for backlinks.
+  const documentColumns = database.query('PRAGMA table_info(note_documents)').all() as { name: string }[];
+  if (!documentColumns.some(column => column.name === 'properties')) database.exec("ALTER TABLE note_documents ADD COLUMN properties TEXT NOT NULL DEFAULT '{}'");
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS note_tags (
+      document_id TEXT NOT NULL REFERENCES note_documents(id) ON DELETE CASCADE, tag_key TEXT NOT NULL, tag TEXT NOT NULL,
+      PRIMARY KEY(document_id, tag_key)
+    ) WITHOUT ROWID;
+    CREATE INDEX IF NOT EXISTS note_tags_key ON note_tags(tag_key, document_id);
+    CREATE INDEX IF NOT EXISTS note_documents_source ON note_documents(source_recording_id, source_version_id);
+  `);
 }
 
 export class OrganizerStore {
@@ -139,6 +180,7 @@ export class OrganizerStore {
     if (data.view === 'starred') where += ' AND d.starred=1';
     if (data.folderId === 'inbox') where += ' AND d.folder_id IS NULL';
     else if (data.folderId) { where += ' AND d.folder_id=?'; params.push(data.folderId); }
+    if (data.tag) { where += ' AND d.id IN (SELECT document_id FROM note_tags WHERE tag_key=?)'; params.push(tagKey(data.tag)); }
     if (data.q) {
       const query = toFtsQuery(data.q);
       if (!query) where += ' AND 0';
@@ -152,7 +194,7 @@ export class OrganizerStore {
   }
 
   get(id: string): NoteDocument {
-    const row = this.database.query(`SELECT ${fields}, d.content FROM note_documents d WHERE d.id=?`).get(identifier.parse(id)) as NoteDocument | null;
+    const row = this.database.query(`SELECT ${fields}, d.content, d.properties FROM note_documents d WHERE d.id=?`).get(identifier.parse(id)) as NoteDocument | null;
     return row ? normalize(row) : fail(404, 'document_not_found', 'Document not found.');
   }
 
@@ -184,8 +226,10 @@ export class OrganizerStore {
       }
       if (data.folderId) this.folder(data.folderId);
       const id = crypto.randomUUID(), now = new Date().toISOString();
-      this.database.query(`INSERT INTO note_documents(id,title,content,folder_id,created_at,updated_at,idempotency_key,request_hash) VALUES(?,?,?,?,?,?,?,?)`)
-        .run(id, data.title, data.content, data.folderId, now, now, data.idempotencyKey, requestHash);
+      const properties = mergeProperties({}, data.properties);
+      this.database.query(`INSERT INTO note_documents(id,title,content,folder_id,properties,created_at,updated_at,idempotency_key,request_hash) VALUES(?,?,?,?,?,?,?,?,?)`)
+        .run(id, data.title, data.content, data.folderId, JSON.stringify(properties), now, now, data.idempotencyKey, requestHash);
+      this.writeTags(id, uniqueTags(data.tags));
       return this.saveVersion(this.get(id));
     })();
   }
@@ -197,11 +241,29 @@ export class OrganizerStore {
       const folderId = data.folderId === undefined ? current.folderId : data.folderId;
       if (folderId) this.folder(folderId);
       const title = data.title ?? current.title, content = data.content ?? current.content, starred = data.starred ?? current.starred;
-      if (title === current.title && content === current.content && folderId === current.folderId && starred === current.starred) return current;
-      this.database.query('UPDATE note_documents SET title=?, content=?, folder_id=?, starred=?, revision=revision+1, updated_at=? WHERE id=?')
-        .run(title, content, folderId, starred ? 1 : 0, new Date().toISOString(), id);
+      const tags = data.tags === undefined ? current.tags : uniqueTags(data.tags);
+      const properties = data.properties === undefined ? current.properties : mergeProperties(current.properties, data.properties);
+      const tagsChanged = tags.join('\n') !== current.tags.join('\n');
+      const propertiesChanged = JSON.stringify(properties) !== JSON.stringify(current.properties);
+      const textChanged = title !== current.title || content !== current.content;
+      if (!textChanged && !tagsChanged && !propertiesChanged && folderId === current.folderId && starred === current.starred) return current;
+      this.database.query('UPDATE note_documents SET title=?, content=?, folder_id=?, starred=?, properties=?, revision=revision+1, updated_at=? WHERE id=?')
+        .run(title, content, folderId, starred ? 1 : 0, JSON.stringify(properties), new Date().toISOString(), id);
+      if (tagsChanged) this.writeTags(id, tags);
       return this.saveVersion(this.get(id));
     })();
+  }
+
+  private writeTags(id: string, tags: string[]) {
+    this.database.query('DELETE FROM note_tags WHERE document_id=?').run(id);
+    const insert = this.database.query('INSERT INTO note_tags(document_id, tag_key, tag) VALUES(?,?,?)');
+    for (const tag of tags) insert.run(id, tagKey(tag), tag);
+  }
+
+  /** Every tag on an active document, with how many active documents carry it. */
+  tags(): { tag: string; count: number }[] {
+    return this.database.query(`SELECT min(t.tag) AS tag, count(*) AS count FROM note_tags t JOIN note_documents d ON d.id=t.document_id
+      WHERE d.deleted_at IS NULL GROUP BY t.tag_key ORDER BY t.tag_key`).all() as { tag: string; count: number }[];
   }
 
   trash(id: string, expected: number): NoteDocument {
@@ -263,6 +325,56 @@ export class OrganizerStore {
       if (!transcript) fail(404, 'transcript_not_found', 'Saved transcript version not found.');
       return { recording: recording!, transcript: transcript! };
     })();
+  }
+
+  /**
+   * Resolve the transcript version a document cites. A version that no longer
+   * exists is reported as `unknown`; it is never replaced with the current text.
+   */
+  source(id: string): DocumentSource {
+    const document = this.get(id);
+    const base: DocumentSource = {
+      documentId: document.id, status: 'none', stale: null, recordingId: document.sourceRecordingId, recordingFilename: null,
+      recordingAvailable: false, versionId: document.sourceVersionId, versionOrigin: null, versionCreatedAt: null,
+      currentVersionId: null, sourceOrigin: document.sourceOrigin,
+    };
+    if (!document.sourceRecordingId) return base;
+    const row = this.database.query(`SELECT r.original_filename AS filename, r.retention_state AS retentionState, t.current_version_id AS currentVersionId,
+        v.id AS versionId, v.origin AS versionOrigin, v.created_at AS versionCreatedAt
+      FROM recordings r LEFT JOIN transcripts t ON t.recording_id=r.id
+      LEFT JOIN transcript_versions v ON v.recording_id=r.id AND v.id=?
+      WHERE r.id=?`).get(document.sourceVersionId, document.sourceRecordingId) as
+      { filename: string | null; retentionState: string; currentVersionId: string | null; versionId: string | null; versionOrigin: string | null; versionCreatedAt: string | null } | null;
+    if (!row) return { ...base, status: 'unknown' };
+    const resolved = { ...base, recordingFilename: row.filename, recordingAvailable: row.retentionState === 'active', currentVersionId: row.currentVersionId };
+    if (!document.sourceVersionId || !row.versionId) return { ...resolved, status: 'unknown' };
+    const stale = row.versionId !== row.currentVersionId;
+    return { ...resolved, status: stale ? 'stale' : 'current', stale, versionOrigin: row.versionOrigin, versionCreatedAt: row.versionCreatedAt };
+  }
+
+  /** Saved transcript versions for a recording, newest first, without their text. */
+  transcriptVersions(recordingId: string): TranscriptVersionSummary[] {
+    const id = identifier.parse(recordingId);
+    if (!this.database.query('SELECT id FROM recordings WHERE id=?').get(id)) fail(404, 'recording_not_found', 'Recording not found.');
+    return (this.database.query(`SELECT ${versionColumns} FROM transcript_versions v LEFT JOIN transcripts t ON t.recording_id=v.recording_id
+      WHERE v.recording_id=? ORDER BY v.created_at DESC, v.rowid DESC LIMIT 200`).all(id) as TranscriptVersionSummary[]).map(normalizeVersion);
+  }
+
+  transcriptVersion(versionId: string): TranscriptVersionDetail;
+  transcriptVersion(versionId: string, withText: false): TranscriptVersionSummary;
+  transcriptVersion(versionId: string, withText = true): TranscriptVersionSummary {
+    const row = this.database.query(`SELECT ${versionColumns}${withText ? ', v.full_text AS fullText' : ''} FROM transcript_versions v
+      LEFT JOIN transcripts t ON t.recording_id=v.recording_id WHERE v.id=?`).get(identifier.parse(versionId)) as TranscriptVersionSummary | null;
+    return row ? normalizeVersion(row) : fail(404, 'version_not_found', 'Transcript version not found.');
+  }
+
+  /** Active documents that cite this exact transcript version. Trash is excluded. */
+  backlinks(versionId: string): TranscriptVersionBacklinks {
+    const version = this.transcriptVersion(versionId, false);
+    const documents = this.database.query(`SELECT ${fields} FROM note_documents d
+      WHERE d.source_recording_id=? AND d.source_version_id=? AND d.deleted_at IS NULL ORDER BY d.updated_at DESC, d.id LIMIT 200`)
+      .all(version.recordingId, version.id) as NoteSummary[];
+    return { version, documents: documents.map(normalize) };
   }
 
   snapshot(input: unknown): NoteDocument {

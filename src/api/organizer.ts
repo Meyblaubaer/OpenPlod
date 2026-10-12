@@ -18,9 +18,13 @@ export function createOrganizerApi(store: OrganizerStore, delivery = new NoteDel
     if (error instanceof OrganizerError) return c.json({ success: false, code: error.code, error: error.message }, error.status);
     return c.json({ success: false, code: 'storage_error', error: 'The note operation could not be completed. Your last saved version is retained.' }, 500);
   });
-  app.get('/', c => c.json({ success: true, data: { schemaVersion: '1', capabilities: ['folders', 'documents', 'transcript-snapshots', 'versions', 'deliveries'], markdownLimitBytes: 524288, trashDays: 30 } }));
+  app.get('/', c => c.json({ success: true, data: { schemaVersion: '1', capabilities: ['folders', 'documents', 'transcript-snapshots', 'versions', 'deliveries', 'tags', 'properties', 'sources', 'backlinks', 'jobs'], markdownLimitBytes: 524288, trashDays: 30 } }));
   app.get('/document-templates', c => c.json({ success: true, data: documentTemplateCatalog() }));
   app.get('/folders', c => c.json({ success: true, data: store.folders() }));
+  app.get('/tags', c => c.json({ success: true, data: store.tags() }));
+  app.get('/recordings/:id/transcript-versions', c => c.json({ success: true, data: store.transcriptVersions(c.req.param('id')) }));
+  app.get('/transcript-versions/:id', c => c.json({ success: true, data: store.transcriptVersion(c.req.param('id')) }));
+  app.get('/transcript-versions/:id/backlinks', c => c.json({ success: true, data: store.backlinks(c.req.param('id')) }));
   app.get('/transcripts/:id', c => c.json({ success: true, data: store.transcript(c.req.param('id'), c.req.query('versionId')) }));
   app.post('/folders', async c => c.json({ success: true, data: store.createFolder(await c.req.json()) }, 201));
   app.patch('/folders/:id', async c => c.json({ success: true, data: store.updateFolder(c.req.param('id'), await c.req.json()) }));
@@ -39,7 +43,8 @@ export function createOrganizerApi(store: OrganizerStore, delivery = new NoteDel
       const heartbeat = setInterval(() => { void stream.writeSSE({ event: 'keepalive', data: '{}' }).catch(() => controller.abort()); }, 10000);
       try {
         const result = await generation.generate(input, async stage => {
-          await stream.writeSSE({ event: 'progress', data: JSON.stringify({ id: input.idempotencyKey, stage, provider: 'mistral' }) });
+          // The provider is reported as its own stage; it is not always Mistral.
+          await stream.writeSSE({ event: 'progress', data: JSON.stringify({ id: input.idempotencyKey, stage }) });
         }, AbortSignal.any([controller.signal, c.req.raw.signal]));
         await stream.writeSSE({ event: 'result', data: JSON.stringify(result) });
       } catch (error) {
@@ -52,6 +57,7 @@ export function createOrganizerApi(store: OrganizerStore, delivery = new NoteDel
   });
   app.get('/generations/:id', c => c.json({ success: true, data: generation.get(c.req.param('id')) }));
   app.post('/generations/:id/save', async c => c.json({ success: true, data: generation.save(c.req.param('id'), await c.req.json()) }));
+  app.get('/documents/:id/source', c => c.json({ success: true, data: store.source(c.req.param('id')) }));
   app.get('/documents/:id', c => c.json({ success: true, data: store.get(c.req.param('id')) }));
   app.patch('/documents/:id', async c => c.json({ success: true, data: store.update(c.req.param('id'), await c.req.json()) }));
   app.delete('/documents/:id', async c => c.json({ success: true, data: store.trash(c.req.param('id'), revisionSchema.parse(await c.req.json()).revision) }));

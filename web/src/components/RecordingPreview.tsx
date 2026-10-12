@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -71,6 +71,13 @@ export function RecordingPreview({
     [busy, setBusy] = useState(false),
     [question, setQuestion] = useState(""),
     [notice, setNotice] = useState("");
+  // One color per speaker, in order of first appearance.
+  const speakerColors = useMemo(() => {
+    const palette = ["#4d89ff", "#a378ed", "#5bc8c8"], colors = new Map<string, string>();
+    for (const segment of recording?.segments ?? [])
+      if (!colors.has(segment.speaker)) colors.set(segment.speaker, palette[colors.size % palette.length]);
+    return colors;
+  }, [recording?.segments]);
   const [audioError, setAudioError] = useState('');
   const [audioAttempt, setAudioAttempt] = useState(0);
   const notesRevision = useRef<number | null>(null);
@@ -124,8 +131,15 @@ export function RecordingPreview({
           dragToSeek: true,
         });
         wave.current = player;
+        // WaveSurfer fires timeupdate every animation frame; a quarter second is
+        // enough resolution for the clock and segment highlight, and avoids
+        // re-rendering the whole transcript ~60 times a second.
+        let lastBucket = -1;
         player.on("timeupdate", (value) => {
-          if (!disposed) setTime(value);
+          const bucket = Math.floor(value * 4);
+          if (disposed || bucket === lastBucket) return;
+          lastBucket = bucket;
+          setTime(value);
         });
         player.on("play", () => {
           if (!disposed) setPlaying(true);
@@ -465,14 +479,7 @@ export function RecordingPreview({
                     <strong>
                       <i
                         style={{
-                          background: ["#4d89ff", "#a378ed", "#5bc8c8"][
-                            Math.max(
-                              0,
-                              recording.segments!.findIndex(
-                                (row) => row.speaker === segment.speaker,
-                              ),
-                            ) % 3
-                          ],
+                          background: speakerColors.get(segment.speaker),
                         }}
                       />
                       {segment.speaker}

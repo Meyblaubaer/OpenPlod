@@ -15,7 +15,7 @@ export class OpenPlodClient implements VaultClient {
   async request(path: string, method = 'GET', body?: unknown) {
     const target = new URL(path, this.origin);
     if (!path.startsWith('/api/') || target.origin !== this.origin || target.hash
-      || !/^\/api\/(v1\/(documents|folders|transcripts)(\/|$)|transcripts(\/|$))/.test(target.pathname)) throw new Error('Unsupported vault API path.');
+      || !/^\/api\/(v1\/(documents|folders|transcripts|tags|recordings|transcript-versions|jobs)(\/|$)|transcripts(\/|$))/.test(target.pathname)) throw new Error('Unsupported vault API path.');
     let response: Response;
     try {
       response = await this.fetcher(target.href, { method, redirect: 'error', signal: AbortSignal.timeout(20000),
@@ -27,6 +27,7 @@ export class OpenPlodClient implements VaultClient {
     if (!response.ok || !payload?.success) {
       if (response.status === 409) throw new Error('Conflict: reload the current revision before retrying. Your changes were not applied.');
       if (response.status === 401) throw new Error('OpenPlod authorization failed. Check your private token.');
+      if (response.status === 404) throw new Error('Not found: nothing in the vault has that id.');
       throw new Error(`Vault request failed (HTTP ${response.status}).`);
     }
     return payload.data;

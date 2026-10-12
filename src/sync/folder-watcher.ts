@@ -6,11 +6,11 @@
 
 import { watch, existsSync, unlinkSync } from 'fs';
 import { readdir, stat } from 'node:fs/promises';
-import { join, extname } from 'path';
+import { join } from 'path';
 import { db } from '../db/client';
-import { recordings, userSettings } from '../db/schema';
+import { userSettings } from '../db/schema';
 import { eq } from 'drizzle-orm';
-import { importRecordingFile, inferRecordingType } from '../library/recording-library';
+import { importRecordingFile, inferRecordingType, isSupportedAudio } from '../library/recording-library';
 import { queueRecordingProcessing } from '../library/processing';
 
 export interface PlaudRecording {
@@ -20,7 +20,25 @@ export interface PlaudRecording {
   modifiedAt: Date;
 }
 
-const AUDIO_EXTS = new Set(['.mp3', '.m4a', '.wav', '.ogg', '.webm', '.aac', '.flac']);
+/**
+ * Files already imported (or found to be duplicates) in this process, keyed by
+ * path with their size and mtime. The vault stores its own copy, so the source
+ * path never appears in the database; without this, every sync re-reads and
+ * re-hashes every audio file in the folder to rediscover it is a duplicate.
+ */
+const knownFiles = new Map<string, string>();
+const fileStamp = (file: { size: number; modifiedAt: Date }) => `${file.size}:${file.modifiedAt.getTime()}`;
+
+/** `plaudRecordingTypes` setting: a JSON list of types to import, or unset for all. */
+function recordingTypeSelected(filePath: string, setting: string | undefined): boolean {
+  if (!setting) return true;
+  try {
+    const selected = JSON.parse(setting);
+    return Array.isArray(selected) && selected.includes(inferRecordingType(filePath));
+  } catch {
+    return true;
+  }
+}
 
 export class FolderWatcher {
   private syncPath: string | null;
@@ -81,7 +99,7 @@ export class FolderWatcher {
   }
 
   private isAudio(filename: string): boolean {
-    return AUDIO_EXTS.has(extname(filename).toLowerCase());
+    return isSupportedAudio(filename);
   }
 
   /** Scan folder and list all audio files */
@@ -105,25 +123,12 @@ export class FolderWatcher {
     return results;
   }
 
-  /** Process a single file — insert into DB if new, queue for transcription */
-  private async processFile(filePath: string, skipExistingCheck = false, settings?: Record<string, string>): Promise<boolean> {
+  /** Process a single file — insert into DB if new (by fingerprint), queue for transcription */
+  private async processFile(filePath: string, settings?: Record<string, string>): Promise<boolean> {
     if (this.processedFiles.has(filePath) || this.pendingFiles.has(filePath)) return false;
     this.pendingFiles.add(filePath);
 
     try {
-      if (!skipExistingCheck) {
-        const existing = await db
-          .select({ id: recordings.id })
-          .from(recordings)
-          .where(eq(recordings.filePath, filePath))
-          .limit(1);
-
-        if (existing.length > 0) {
-          this.processedFiles.add(filePath);
-          return false;
-        }
-      }
-
       const imported = await importRecordingFile({
         sourcePath: filePath,
         provenance: { sourceProvider: 'plaud', sourceTransport: 'folder' },
@@ -159,20 +164,17 @@ export class FolderWatcher {
     }
 
     const settings = Object.fromEntries((await db.select().from(userSettings)).map(row => [row.key, row.value]));
-    const existingRows = await db.select({ filePath: recordings.filePath }).from(recordings);
-    const existingPaths = new Set(existingRows.map(recording => recording.filePath));
 
     for (const rec of await this.listRecordings()) {
       try {
-        if (existingPaths.has(rec.path)) {
+        // The same type filter the live watcher applies, so a full sync never imports deselected types.
+        if (!recordingTypeSelected(rec.path, settings.plaudRecordingTypes) || knownFiles.get(rec.path) === fileStamp(rec)) {
           result.skipped++;
-          this.processedFiles.add(rec.path);
           continue;
         }
-        if (await this.processFile(rec.path, true, settings)) {
-          result.added++;
-          existingPaths.add(rec.path);
-        }
+        if (await this.processFile(rec.path, settings)) result.added++;
+        else result.skipped++;
+        if (existsSync(rec.path)) knownFiles.set(rec.path, fileStamp(rec));
       } catch (err) {
         result.errors.push(`${rec.filename}: ${err}`);
       }
@@ -194,20 +196,10 @@ export class FolderWatcher {
     const [setting] = await db.select({ value: userSettings.value }).from(userSettings)
       .where(eq(userSettings.key, 'autoImport')).limit(1);
     if (setting?.value !== 'true') return;
-    if (!await this.isRecordingTypeSelected(filePath)) return;
-    await this.processFile(filePath);
-  }
-
-  private async isRecordingTypeSelected(filePath: string): Promise<boolean> {
-    const [setting] = await db.select({ value: userSettings.value }).from(userSettings)
+    const [types] = await db.select({ value: userSettings.value }).from(userSettings)
       .where(eq(userSettings.key, 'plaudRecordingTypes')).limit(1);
-    if (!setting?.value) return true;
-    try {
-      const selected = JSON.parse(setting.value);
-      return Array.isArray(selected) && selected.includes(inferRecordingType(filePath));
-    } catch {
-      return true;
-    }
+    if (!recordingTypeSelected(filePath, types?.value)) return;
+    await this.processFile(filePath);
   }
 
   private async shouldDeleteSourceAfterImport(): Promise<boolean> {

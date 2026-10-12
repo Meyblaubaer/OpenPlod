@@ -2,8 +2,9 @@ import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { copyFile, open, rename, stat, unlink } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { db } from '../db/client';
-import { recordings, transcriptVersions, transcripts } from '../db/schema';
+import { recordings, transcripts, userSettings } from '../db/schema';
 import { and, eq, inArray, or } from 'drizzle-orm';
 
 export const AUDIO_EXTENSIONS = new Set(['.mp3', '.m4a', '.wav', '.ogg', '.webm', '.aac', '.flac']);
@@ -46,6 +47,15 @@ export function incomingDirectory(): string {
 }
 
 /** Replaces characters that are not safe in a filename. */
+/** The configured Plaud sync folder (setting, then `PLAUD_SYNC_PATH`), with `~/` expanded. */
+export async function configuredSyncPath(): Promise<string | null> {
+  const [setting] = await db.select({ value: userSettings.value }).from(userSettings)
+    .where(eq(userSettings.key, 'syncFolderPath')).limit(1);
+  const raw = setting?.value || process.env.PLAUD_SYNC_PATH;
+  if (!raw) return null;
+  return resolve(raw.startsWith('~/') ? `${homedir()}/${raw.slice(2)}` : raw);
+}
+
 export function safeFilename(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 160) || 'recording.m4a';
 }
@@ -72,6 +82,20 @@ export async function importRecordingFile(params: {
   if (params.expectedFingerprint && params.expectedFingerprint !== fingerprint) {
     throw new RecordingImportConflict('Audio fingerprint mismatch. Keep the local recording and retry.');
   }
+  // Two imports of the same audio (a startup sync racing a manual one) would both pass the
+  // duplicate check before either inserts; serialize them so the second sees the first.
+  return withImportLock(fingerprint, () => insertImportedRecording(params, sourcePath, fingerprint));
+}
+
+const importLocks = new Map<string, Promise<unknown>>();
+async function withImportLock<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const current = (importLocks.get(key) ?? Promise.resolve()).catch(() => undefined).then(run);
+  importLocks.set(key, current);
+  try { return await current; }
+  finally { if (importLocks.get(key) === current) importLocks.delete(key); }
+}
+
+async function insertImportedRecording(params: Parameters<typeof importRecordingFile>[0], sourcePath: string, fingerprint: string): Promise<{ recording: ImportedRecording; added: boolean }> {
   const metadata = readPlaudMetadata(sourcePath);
   const sourceRecordingId = params.provenance.sourceRecordingId ?? metadata.id ?? null;
   const duplicateConditions = [eq(recordings.fingerprint, fingerprint)];
@@ -147,6 +171,7 @@ export async function replaceRecordingAudio(params: {
 }): Promise<void> {
   const [recording] = await db.select().from(recordings).where(eq(recordings.id, params.recordingId)).limit(1);
   if (!recording) throw new Error('Recording not found.');
+  if (recording.retentionState !== 'active') throw new Error('Restore this recording from Trash before replacing its audio.');
   if (params.expectedRevision !== undefined && recording.revision !== params.expectedRevision) {
     throw new Error('revision_conflict');
   }
@@ -170,20 +195,6 @@ export async function replaceRecordingAudio(params: {
     errorMessage: null,
     revision: recording.revision + 1,
   }).where(eq(recordings.id, recording.id));
-}
-
-export async function saveTranscriptVersion(params: {
-  recordingId: string;
-  fullText: string;
-  segments?: unknown;
-  origin: 'generated' | 'edited';
-}): Promise<void> {
-  await db.insert(transcriptVersions).values({
-    recordingId: params.recordingId,
-    fullText: params.fullText,
-    segments: params.segments,
-    origin: params.origin,
-  });
 }
 
 export async function softDeleteRecording(recordingId: string): Promise<boolean> {

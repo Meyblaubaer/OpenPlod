@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { importRecordingFile, RecordingImportConflict } from '../library/recording-library';
+import { importRecordingFile, RecordingImportConflict, safeFilename } from '../library/recording-library';
 import { queueRecordingProcessing } from '../library/processing';
 import { PlaudDeviceAuth, readDeviceCredentials } from '../sync/plaud-device-auth';
 
@@ -80,9 +80,5 @@ app.post('/recordings', async c => {
     await Bun.file(incomingPath).delete().catch(() => undefined);
   }
 });
-
-function safeFilename(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 160) || 'recording.m4a';
-}
 
 export default app;

@@ -31,7 +31,7 @@ export function BatchTranscribe({ recordings, onFinished }: {
 
   // Only recordings that have no transcript are candidates; re-transcribing a
   // finished one is a separate, deliberate action on that recording.
-  const candidates = recordings.filter(row => !row.transcriptText?.trim() && row.retentionState === 'active')
+  const candidates = recordings.filter(row => !row.hasTranscript && !row.transcriptText?.trim() && row.retentionState === 'active')
 
   const fail = (failure: unknown) => {
     if (mounted.current) setError(failure instanceof Error ? failure.message : 'The batch could not run.')

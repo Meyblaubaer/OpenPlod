@@ -38,14 +38,22 @@ The MCP client accepts HTTP only for loopback hosts. Remote vault connections re
 
 | Tool | Purpose |
 | --- | --- |
-| `list_documents` | Search/filter/paginate Markdown notes by folder, star, Trash, and text |
-| `get_document` | Read saved Markdown, revision, folder, and source references |
+| `list_documents` | Search/filter/paginate Markdown notes by folder, star, Trash, tag, and text |
+| `get_document` | Read saved Markdown, revision, folder, tags, properties, and source references |
+| `list_tags` | Tags in use on active notes, with counts |
+| `get_document_source` | Resolve the exact transcript version a note cites: `current`, `stale`, `unknown`, or `none` |
 | `list_folders` | Read the folder hierarchy and direct document counts |
 | `list_document_versions` | Paginate history without downloading every version's content |
 | `get_document_version` | Read one historical Markdown version |
 | `list_transcripts` | Browse source recording transcripts, 30 per page |
 | `get_transcript` | Read current or historical text for an active recording |
+| `list_transcript_versions` | A recording's saved transcript versions, newest first, without text, with `current` and citing-note counts |
+| `get_transcript_version` | One transcript version by id, including its text and `current` flag |
+| `list_transcript_backlinks` | Active notes that cite one exact transcript version (Trash excluded) |
+| `list_jobs` | Processing jobs, newest first, filterable by state and recording |
+| `get_job` | One processing job: state, provider, checkpoint, error, and produced transcript version ids |
 
+The source, version, and job tools (0.7.0, roadmap KB-07) only read. `get_job` and `list_jobs` report what the queue already knows; they never contact a transcription provider, retry, resume, or cancel anything. Unknown note, version, and job ids are errors (`Not found`), never empty results. A note whose cited transcript version no longer exists is reported as `unknown`; the current text is never substituted.
 Resources use `openplod://documents/{id}` with `text/markdown`. Resource discovery returns up to 100 active notes; use `list_documents` for complete pagination or search.
 
 Examples of requests to your MCP-enabled assistant:
@@ -53,6 +61,8 @@ Examples of requests to your MCP-enabled assistant:
 - "Find my notes about onboarding and compare the decisions."
 - "Read the latest transcript and list the action items."
 - "Show the Markdown notes in my Meetings folder."
+- "Which of my notes were written from an older version of this transcript?"
+- "Did last night's transcription jobs finish?"
 
 ## Optional Write Tools
 
@@ -61,7 +71,7 @@ Set `OPENPLOD_MCP_WRITE=1` in the MCP process environment to register:
 | Tool | Purpose |
 | --- | --- |
 | `create_document` | Create a note with a caller-generated idempotency key |
-| `update_document` | Edit, rename, star, or move a note with its current revision |
+| `update_document` | Edit, rename, star, tag, set properties on, or move a note with its current revision |
 | `save_transcript` | Save a provenance-linked snapshot of a transcript version |
 | `create_folder` | Create a folder, optionally under an existing folder |
 | `update_folder` | Rename/move a folder with cycle and revision checks |
@@ -87,4 +97,4 @@ bun test src/mcp src/organizer
 bun run typecheck
 ```
 
-Tests connect the official MCP client and server over the SDK's in-memory transport. They cover negotiation, resource reads, read-only tool boundaries, write opt-in, validation, revision conflicts, idempotency, and HTTP-client redaction. A separate stdio smoke test should accompany client setup.
+Tests connect the official MCP client and server over the SDK's in-memory transport. They cover negotiation, resource reads, read-only tool boundaries (including that the source, version, and job tools issue only `GET` requests), write opt-in, validation, revision conflicts, idempotency, and HTTP-client redaction. A separate stdio smoke test should accompany client setup.

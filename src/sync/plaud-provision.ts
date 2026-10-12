@@ -186,7 +186,6 @@ export class PlaudIdentityProvisioner {
 export const identityDirectory = () => dirname(resolve(process.env.OPENPLOD_LIBRARY_PATH || './data/recordings'));
 export const identityFilePath = () => process.env.OPENPLOD_DEVICE_IDENTITY || join(identityDirectory(), 'plaud-device.json');
 
-export const identityFileExists = () => existsSync(identityFilePath());
 
 /** Read the saved identity without throwing when it is absent or unreadable. */
 export async function readStoredIdentity(): Promise<PlaudDeviceIdentity | null> {

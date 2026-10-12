@@ -4,13 +4,12 @@ import { getConnInfo } from 'hono/bun';
 import { PlaudEnrollment } from '../sync/plaud-enrollment';
 import { loadIdentity } from '../sync/plaud-direct';
 import { existsSync, mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { basename, resolve } from 'node:path';
 import { db, sqlite } from '../db/client';
 import { PlaudAutoImport } from '../sync/plaud-auto-import';
 import { recordings, userSettings } from '../db/schema';
 import { eq } from 'drizzle-orm';
-import { fingerprintFile, importRecordingFile, incomingDirectory, safeFilename } from '../library/recording-library';
+import { configuredSyncPath, fingerprintFile, importRecordingFile, incomingDirectory, safeFilename } from '../library/recording-library';
 import { queueRecordingProcessing } from '../library/processing';
 import { saveGeneratedTranscript } from '../library/transcript-history';
 import { FolderWatcher } from '../sync/folder-watcher';
@@ -527,14 +526,6 @@ app.get('/available-recordings', async c => {
   });
   return c.json({ success: true, data: available });
 });
-
-async function configuredSyncPath(): Promise<string | null> {
-  const [setting] = await db.select({ value: userSettings.value }).from(userSettings)
-    .where(eq(userSettings.key, 'syncFolderPath')).limit(1);
-  const raw = setting?.value || process.env.PLAUD_SYNC_PATH;
-  if (!raw) return null;
-  return resolve(raw.startsWith('~/') ? `${homedir()}/${raw.slice(2)}` : raw);
-}
 
 async function audioDurationMs(filePath: string): Promise<number | null> {
   try {

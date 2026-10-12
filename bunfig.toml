@@ -1,0 +1,3 @@
+[test]
+# Point the shared database client at a throwaway vault before any test file loads it.
+preload = ["./src/test-setup.ts"]

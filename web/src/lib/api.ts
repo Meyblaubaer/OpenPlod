@@ -11,6 +11,8 @@ export interface Recording {
   createdAt: string
   status: 'pending' | 'transcribing' | 'summarizing' | 'complete' | 'failed'
   transcriptText?: string
+  /** Set by list endpoints, which do not include the transcript itself. */
+  hasTranscript?: boolean
   transcriptOrigin?: 'generated' | 'edited'
   transcriptVersionId?: string | null
   summary?: string
@@ -39,7 +41,10 @@ export interface TranscriptWord {
 
 export interface TranscriptSegment {
   id: string
+  /** Display label, e.g. "Speaker 0". Never send it back to the backend. */
   speaker: string
+  /** The stored speaker value (diarization number or name), or null when unlabeled. */
+  speakerId: number | string | null
   text: string
   startTime: number
   endTime: number
@@ -127,15 +132,6 @@ export interface SubtitleReadiness {
   detail: string
   cueCount: number
   formats: string[]
-}
-
-export interface TranscriptVersionRow {
-  id: string
-  recordingId: string
-  fullText: string
-  origin: string
-  provenance: Record<string, unknown> | null
-  createdAt: string
 }
 
 /** A saved, reusable AI instruction (roadmap TS-08). */
@@ -238,12 +234,6 @@ export interface DashboardStats {
   totalHours: number
   transcribedCount: number
   pendingCount: number
-}
-
-export interface SyncResult {
-  added: number
-  skipped: number
-  errors: string[]
 }
 
 export interface PlaudStatus {
@@ -404,6 +394,7 @@ interface RawRecording {
   uploadedAt?: string | null
   status?: Recording['status']
   transcript?: RawTranscript | null
+  hasTranscript?: boolean
   sourceProvider?: string | null
   sourceRecordingId?: string | null
   sourceTransport?: string | null
@@ -432,6 +423,9 @@ async function fetchJSON<T>(url: string, opts?: RequestInit): Promise<T> {
   return payload as T
 }
 
+export const speakerLabel = (speaker: number | string | null | undefined) =>
+  typeof speaker === 'string' ? speaker : speaker !== undefined && speaker !== null ? `Speaker ${speaker}` : 'Speaker'
+
 /** Map backend recording shape to frontend Recording */
 function mapRecording(r: RawRecording): Recording {
   const transcript = r.transcript
@@ -448,7 +442,8 @@ function mapRecording(r: RawRecording): Recording {
       const s = segs[i]
       segments.push({
         id: `s${i}`,
-        speaker: typeof s.speaker === 'string' ? s.speaker : s.speaker !== undefined ? `Speaker ${s.speaker}` : 'Speaker',
+        speaker: speakerLabel(s.speaker),
+        speakerId: s.speaker ?? null,
         text: s.text || '',
         startTime: s.start || 0,
         endTime: s.end || 0,
@@ -481,6 +476,7 @@ function mapRecording(r: RawRecording): Recording {
     createdAt: r.uploadedAt || '',
     status: r.status || 'pending',
     transcriptText: transcript?.fullText,
+    hasTranscript: r.hasTranscript ?? Boolean(transcript?.fullText?.trim()),
     transcriptOrigin: transcript?.origin,
     transcriptVersionId: transcript?.currentVersionId,
     summary: transcript?.summary ? (typeof transcript.summary === 'string' ? transcript.summary : transcript.summary.overview) : undefined,
@@ -580,11 +576,6 @@ export const api = {
     return api.getSettings()
   },
 
-  sync: async (): Promise<SyncResult> => {
-    const res = await fetchJSON<ApiEnvelope<SyncResult>>('/recordings/sync', { method: 'POST' })
-    return res.data
-  },
-
   // --- Custom AI actions (TS-08) and batches (TS-10) ---------------------
 
   listCustomActions: async (): Promise<CustomAction[]> => {
@@ -643,11 +634,6 @@ export const api = {
     const res = await fetchJSON<ApiEnvelope<OperationResult>>(`/recordings/${id}/transcript/operations`, {
       method: 'POST', body: JSON.stringify({ operations, ...options }), signal: AbortSignal.timeout(30000),
     })
-    return res.data
-  },
-
-  transcriptVersions: async (id: string): Promise<TranscriptVersionRow[]> => {
-    const res = await fetchJSON<ApiEnvelope<TranscriptVersionRow[]>>(`/recordings/${id}/transcript/versions`, { signal: AbortSignal.timeout(20000) })
     return res.data
   },
 
@@ -835,7 +821,7 @@ export const api = {
   },
 
   getTranscriptVersions: async (id: string): Promise<TranscriptVersion[]> => {
-    const res = await fetchJSON<ApiEnvelope<TranscriptVersion[]>>(`/recordings/${id}/transcript/versions`)
+    const res = await fetchJSON<ApiEnvelope<TranscriptVersion[]>>(`/recordings/${id}/transcript/versions`, { signal: AbortSignal.timeout(20000) })
     return res.data
   },
 

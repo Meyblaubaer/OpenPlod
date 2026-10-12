@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/icon-button'
 import { DocumentCanvas } from '@/components/DocumentCanvas'
 import { FolderSelect, NoteDialog, SendNoteDialog } from '@/components/NoteDialogs'
+import { NoteMetadata } from '@/components/NoteMetadata'
 import { notesApi, folderPaths, type NoteFolder, type NoteDocument, type NotePage, type NoteVersion } from '@/lib/notes-api'
 import { exportDocument, safeDocumentName } from '@/lib/document-export'
 import './notes.css'
@@ -23,6 +24,8 @@ export function NotesPage() {
   const [view, setView] = useState('all')
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState('updated')
+  const [tag, setTag] = useState('')
+  const [tags, setTags] = useState<{ tag: string; count: number }[]>([])
   const [offset, setOffset] = useState(0)
   const [page, setPage] = useState<NotePage>(emptyPage)
   const [document, setDocument] = useState<NoteDocument | null>(null)
@@ -53,6 +56,7 @@ export function NotesPage() {
   useEffect(() => {
     const controller = new AbortController()
     notesApi.folders(controller.signal).then(setFolders).catch(error => { if (!controller.signal.aborted) setError(errorMessage(error)) })
+    notesApi.tags(controller.signal).then(setTags).catch(() => { /* The tag filter is optional; the list still loads. */ })
     return () => controller.abort()
   }, [refresh])
   useEffect(() => {
@@ -61,12 +65,13 @@ export function NotesPage() {
     const timer = window.setTimeout(() => {
       const request: Record<string, string> = { q: query, sort, offset: String(offset), view: view === 'starred' || view === 'trash' ? view : 'all' }
       if (view !== 'all' && view !== 'starred' && view !== 'trash') request.folderId = view
+      if (tag) request.tag = tag
       notesApi.list(request, controller.signal).then(result => { if (!controller.signal.aborted) setPage(result) })
         .catch(error => { if (!controller.signal.aborted) setError(errorMessage(error)) })
         .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     }, query ? 200 : 0)
     return () => { controller.abort(); window.clearTimeout(timer) }
-  }, [view, query, sort, offset, refresh])
+  }, [view, query, sort, offset, tag, refresh])
   useEffect(() => {
     if (!selectedId) { setDocument(null); setDocumentLoading(false); return }
     const controller = new AbortController()
@@ -193,11 +198,12 @@ export function NotesPage() {
         </header>
         <label className="notes-search"><Search /><input aria-label="Search notes" value={query} placeholder="Search notes" maxLength={200} onChange={event => { setQuery(event.target.value); setOffset(0) }} /></label>
         <select className="notes-sort" aria-label="Sort notes" value={sort} onChange={event => { setSort(event.target.value); setOffset(0) }}><option value="updated">Last edited</option><option value="title">Title A to Z</option></select>
+        {tags.length > 0 && <div className="notes-tag-filter" role="group" aria-label="Filter by tag">{tags.map(item => <button type="button" key={item.tag} aria-pressed={tag.toLocaleLowerCase() === item.tag.toLocaleLowerCase()} onClick={() => { setTag(current => current.toLocaleLowerCase() === item.tag.toLocaleLowerCase() ? '' : item.tag); setOffset(0) }}>{item.tag}<small>{item.count}</small></button>)}</div>}
         <div className="notes-list-items" aria-busy={loading}>
           {loading ? <div className="notes-empty" role="status"><Loader2 className="animate-spin" />Loading notes</div> : page.documents.map(note => <button type="button" key={note.id} className={`notes-list-item ${selectedId === note.id ? 'selected' : ''}`} onClick={() => selectDocument(note.id)}>
-            <FileText className="notes-list-file" /><div className="notes-list-copy"><div><strong>{note.title}</strong>{note.starred && <Star className="note-star" />}</div><p>{note.excerpt || 'Empty note'}</p><small>{shortDate(note.updatedAt)}<span>{note.sourceRecordingId ? 'Transcript' : 'Markdown'}</span></small></div>
+            <FileText className="notes-list-file" /><div className="notes-list-copy"><div><strong>{note.title}</strong>{note.starred && <Star className="note-star" />}</div><p>{note.excerpt || 'Empty note'}</p>{note.tags.length > 0 && <span className="notes-list-tags">{note.tags.slice(0, 3).map(value => <i key={value}>{value}</i>)}</span>}<small>{shortDate(note.updatedAt)}<span>{note.sourceRecordingId ? 'Transcript' : 'Markdown'}</span></small></div>
           </button>)}
-          {!loading && page.documents.length === 0 && <div className="notes-empty"><FileText /><p>{view === 'trash' ? 'Trash is empty' : query ? 'No matching notes' : 'No notes here yet'}</p>{view !== 'trash' && !query && <Button size="sm" variant="outline" onClick={createNote}><FilePlus2 />New note</Button>}</div>}
+          {!loading && page.documents.length === 0 && <div className="notes-empty"><FileText /><p>{view === 'trash' ? 'Trash is empty' : query || tag ? 'No matching notes' : 'No notes here yet'}</p>{view !== 'trash' && !query && !tag && <Button size="sm" variant="outline" onClick={createNote}><FilePlus2 />New note</Button>}</div>}
         </div>
         {page.total > page.limit && <footer className="notes-pagination"><Button size="icon" variant="ghost" aria-label="Previous page" title="Previous page" disabled={offset === 0 || loading} onClick={() => setOffset(value => Math.max(0, value - page.limit))}><ChevronLeft /></Button><span>{Math.floor(offset / page.limit) + 1} / {Math.ceil(page.total / page.limit)}</span><Button size="icon" variant="ghost" aria-label="Next page" title="Next page" disabled={offset + page.limit >= page.total || loading} onClick={() => setOffset(value => value + page.limit)}><ChevronRight /></Button></footer>}
       </section>
@@ -229,6 +235,8 @@ export function NotesPage() {
           </header>
           {document.deletedAt ? <div className="notes-trash-banner"><span>In Trash since {shortDate(document.deletedAt)}</span><Button size="sm" variant="outline" disabled={busy} onClick={() => void mutate(async () => { applyDocument(await notesApi.restore(document.id, document.revision)); setNotice('Note restored') })}><RotateCcw />Restore</Button><Button size="icon" variant="ghost" title="Delete permanently" aria-label="Delete permanently" disabled={busy} onClick={() => { if (window.confirm('Permanently delete this note and its saved versions? This cannot be undone. Source audio is not affected.')) void mutate(async () => { await notesApi.purge(document.id, document.revision); setParams({}); setDocument(null) }) }}><Trash2 /></Button></div>
             : <div className="notes-location"><Folder /><FolderSelect folders={folders} value={folderDraft} onChange={setFolderDraft} disabled={busy} />{document.sourceRecordingId && <Link to={`/transcripts/${document.sourceRecordingId}`}><FileText />Source transcript</Link>}</div>}
+          {!document.deletedAt && <NoteMetadata document={document} disabled={busy || dirty} onOpenDocument={selectDocument}
+            onUpdate={data => void mutate(async () => applyDocument(await notesApi.update(document.id, { ...data, revision: document.revision })))} />}
           <DocumentCanvas key={document.id} document={document} content={content} onChange={setContent} mode={mode} onModeChange={setMode} busy={busy} onSave={save} />
           {sendOpen && <SendNoteDialog document={document} onClose={() => setSendOpen(false)} />}
           {historyOpen && <NoteHistory document={document} onClose={() => setHistoryOpen(false)} onRestored={note => { applyDocument(note); setRefresh(value => value + 1); setHistoryOpen(false); setNotice('Version restored as a new revision') }} />}

@@ -25,7 +25,7 @@ export interface TranscriptSearchResult {
   segments: TranscriptSearchSegment[];
 }
 
-function parseSegments(value: string | null): Array<{ speaker?: number; text?: string; start?: number; end?: number }> {
+function parseSegments(value: string | null): Array<{ speaker?: number | string; text?: string; start?: number; end?: number }> {
   if (!value) return [];
   try {
     const parsed = JSON.parse(value);
@@ -50,26 +50,33 @@ export function searchTranscripts(input: string, limit = 50): TranscriptSearchRe
     FROM transcripts_fts
     JOIN transcripts t ON t.rowid = transcripts_fts.rowid
     JOIN recordings r ON r.id = t.recording_id
-    WHERE transcripts_fts MATCH ?
+    WHERE transcripts_fts MATCH ? AND r.retention_state = 'active'
     ORDER BY bm25(transcripts_fts), r.recorded_at DESC
     LIMIT ?
   `).all(ftsQuery, safeLimit);
 
-  const normalizedQuery = input.toLocaleLowerCase();
+  // FTS matches every token anywhere in the transcript, so excerpts are found by
+  // token too; searching for the whole phrase would miss most real matches.
+  const tokens = input.normalize('NFKC').toLocaleLowerCase().match(/[\p{L}\p{N}_]+/gu)?.slice(0, 8) ?? [];
+  const firstMatch = (text: string) => {
+    const lower = text.normalize('NFKC').toLocaleLowerCase();
+    const positions = tokens.map(token => lower.indexOf(token)).filter(index => index >= 0);
+    return positions.length ? Math.min(...positions) : -1;
+  };
   return rows.map(row => {
     const matchingSegments = parseSegments(row.segments)
-      .filter(segment => (segment.text ?? '').toLocaleLowerCase().includes(normalizedQuery))
+      .filter(segment => firstMatch(segment.text ?? '') >= 0)
       .slice(0, 5)
       .map((segment, index) => ({
         id: `s${index}`,
-        speaker: segment.speaker !== undefined ? `Speaker ${segment.speaker}` : 'Speaker',
+        speaker: typeof segment.speaker === 'string' ? segment.speaker : segment.speaker !== undefined ? `Speaker ${segment.speaker}` : 'Speaker',
         text: segment.text ?? '',
         startTime: segment.start ?? 0,
         endTime: segment.end ?? 0,
       }));
 
     if (matchingSegments.length === 0) {
-      const matchIndex = row.fullText.toLocaleLowerCase().indexOf(normalizedQuery);
+      const matchIndex = firstMatch(row.fullText);
       const excerptStart = Math.max(0, matchIndex - 80);
       matchingSegments.push({
         id: 's0',

@@ -17,7 +17,8 @@ export interface SubtitleSegment {
   start: number;
   end: number;
   text: string;
-  speaker?: number | null;
+  /** Diarization number, or a name once the speaker has been renamed. */
+  speaker?: number | string | null;
 }
 
 /** Why a transcript cannot be exported as subtitles. */
@@ -50,7 +51,8 @@ function readSegments(value: unknown): SubtitleSegment[] | null {
     if (!entry || typeof entry !== 'object') continue;
     const record = entry as Record<string, unknown>;
     const text = typeof record.text === 'string' ? record.text : '';
-    const speaker = typeof record.speaker === 'number' && Number.isInteger(record.speaker) ? record.speaker : null;
+    const speaker = typeof record.speaker === 'number' && Number.isInteger(record.speaker) ? record.speaker
+      : typeof record.speaker === 'string' && record.speaker.trim() ? record.speaker.trim() : null;
     segments.push({
       start: typeof record.start === 'number' ? record.start : Number.NaN,
       end: typeof record.end === 'number' ? record.end : Number.NaN,
@@ -108,7 +110,8 @@ function stamp(seconds: number, separator: ',' | '.'): string {
 /** Cue text: CR stripped, blank lines dropped so a cue never terminates early. */
 function cueText(segment: SubtitleSegment, speakerLabels: boolean): string {
   const body = segment.text.replace(/\r/g, '').split('\n').map(line => line.trim()).filter(Boolean).join('\n');
-  return speakerLabels && typeof segment.speaker === 'number' ? `Speaker ${segment.speaker + 1}: ${body}` : body;
+  if (!speakerLabels || segment.speaker === null || segment.speaker === undefined) return body;
+  return typeof segment.speaker === 'number' ? `Speaker ${segment.speaker + 1}: ${body}` : `${segment.speaker.replace(/[\r\n]+/g, ' ')}: ${body}`;
 }
 
 export interface SubtitleOptions {

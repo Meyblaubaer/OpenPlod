@@ -7,7 +7,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { RecordingBookmarks } from '../library/bookmarks';
 import { db, sqlite } from '../db/client';
-import { recordings, transcripts, speakerProfiles, speakerMappings, userSettings } from '../db/schema';
+import { recordings, transcripts, userSettings } from '../db/schema';
 import { SUBTITLE_MIME, isSubtitleFormat, renderSubtitles, subtitleReadiness } from '../library/subtitle-export';
 import { applyOperation, parseSegments, speakerLabels, type TranscriptOperation } from '../library/transcript-operations';
 import { compareVersions, type VersionRecord } from '../library/transcript-diff';
@@ -20,13 +20,13 @@ import { BatchManager, summarize } from '../library/batch';
 import { eq, desc, and, sql, like } from 'drizzle-orm';
 import { jobQueue } from '../jobs/queue';
 import { parseByteRange } from './audio';
-import { homedir } from 'os';
 import { createReadStream } from 'fs';
 import { Readable } from 'stream';
 import { existsSync, mkdirSync } from 'fs';
 import { resolve, sep } from 'path';
 import {
   importRecordingFile,
+  configuredSyncPath,
   incomingDirectory,
   purgeRecording,
   replaceRecordingAudio,
@@ -81,9 +81,11 @@ app.get('/', async (c) => {
       .from(recordings)
       .where(where);
 
+    // One lookup for the page, so the library can tell which rows still need a transcript.
+    const transcribed = transcribedIds(list.map(row => row.id));
     return c.json({
       success: true,
-      data: list,
+      data: list.map(row => ({ ...row, hasTranscript: transcribed.has(row.id) })),
       pagination: { total: Number(count), limit, offset, hasMore: offset + list.length < Number(count) },
     });
   } catch (error) {
@@ -201,8 +203,12 @@ app.post('/:id/replace-audio', async c => {
       expectedRevision: Number(body.revision),
       originalFilename: safeFilename(file.name),
     });
+    // The saved transcript belongs to the old audio; process the new audio like a fresh import.
+    const [replaced] = await db.select({ filePath: recordings.filePath }).from(recordings).where(eq(recordings.id, c.req.param('id'))).limit(1);
+    if (replaced) await queueRecordingProcessing({ recordingId: c.req.param('id'), filePath: replaced.filePath });
   } catch (error) {
     if (error instanceof Error && error.message === 'revision_conflict') return c.json({ success: false, error: error.message }, 409);
+    if (error instanceof Error && /Trash|not found|Unsupported/.test(error.message)) return c.json({ success: false, error: error.message }, 400);
     throw error;
   } finally {
     await Bun.file(incomingPath).delete().catch(() => undefined);
@@ -219,6 +225,7 @@ app.patch('/:id/transcript', async c => {
     if (body.segments !== undefined && body.segments !== null) body.segments = z.array(z.object({
       start: z.number().finite().nonnegative(), end: z.number().finite().nonnegative(), text: z.string().max(50000),
       speaker: z.union([z.number().int().nonnegative(), z.string().max(80)]).optional(), confidence: z.number().optional(),
+      words: z.array(z.object({ start: z.number().finite().nonnegative(), end: z.number().finite().nonnegative(), text: z.string().max(200) })).max(5000).nullable().optional(),
     }).refine(s => s.end >= s.start)).max(20000).parse(body.segments);
     updateTranscript({ recordingId: c.req.param('id'), fullText: body.fullText, segments: body.segments, revision: body.revision });
   } catch (error) {
@@ -284,14 +291,22 @@ app.post('/:id/transcript/custom-actions/:actionId', async c => {
  */
 const batches = new BatchManager(2);
 
+/** Which of these recordings already have a saved transcript, in one statement. */
+function transcribedIds(ids: string[]): Set<string> {
+  if (ids.length === 0) return new Set();
+  return new Set((sqlite.query('SELECT recording_id AS id FROM transcripts WHERE recording_id IN (SELECT value FROM json_each(?))')
+    .all(JSON.stringify(ids)) as { id: string }[]).map(row => row.id));
+}
+
 app.post('/batch/estimate', async c => {
   const body: { recordingIds?: string[] } = await c.req.json<{ recordingIds?: string[] }>().catch(() => ({}));
   const ids = [...new Set((body.recordingIds ?? []).filter(value => typeof value === 'string'))];
   if (ids.length === 0) return c.json({ success: false, error: 'Select at least one recording.' }, 400);
   const config = readAiConfig(sqlite);
   const provider = config.transcriptionEngine ?? null;
+  const transcribed = transcribedIds(ids);
   return c.json({ success: true, data: {
-    recordings: ids.length, wouldRun: ids.length,
+    recordings: ids.length, wouldRun: ids.filter(id => !transcribed.has(id)).length,
     usesCloudProvider: provider !== null && provider !== 'whisper',
     provider, estimatedCost: null,
   }});
@@ -303,7 +318,11 @@ app.post('/batch', async c => {
   if (body.confirm !== true) {
     return c.json({ success: false, error: 'Confirm the batch before it runs; it may use a paid provider.' }, 400);
   }
-  const ids = [...new Set((body.recordingIds ?? []).filter(value => typeof value === 'string'))].slice(0, 500);
+  // Re-transcribing a finished recording is a second paid call, not batch work; it stays a per-recording action.
+  const requested = [...new Set((body.recordingIds ?? []).filter(value => typeof value === 'string'))].slice(0, 500);
+  const transcribed = transcribedIds(requested);
+  const ids = requested.filter(id => !transcribed.has(id));
+  if (ids.length === 0 && !body.retryOf) return c.json({ success: false, error: 'Every selected recording already has a transcript.' }, 400);
   try {
     const job = batches.start({
       kind: 'transcribe', recordingIds: ids, retryOf: body.retryOf,
@@ -312,7 +331,11 @@ app.post('/batch', async c => {
           .get(recordingId) as { filePath: string; retentionState: string } | null;
         if (!row) throw new Error('Recording not found.');
         if (row.retentionState !== 'active') throw new Error('Recording is in Trash.');
-        await queueRecordingProcessing({ recordingId, filePath: row.filePath });
+        // A batch is an explicit "transcribe these" request: queue transcription directly rather than
+        // through the import route, which may forward instead or do nothing when auto-transcribe is off.
+        if (!jobQueue.activeJob('process-recording', recordingId))
+          sqlite.query("UPDATE recordings SET status='pending', error_message=NULL WHERE id=?").run(recordingId);
+        await jobQueue.add('process-recording', { recordingId, filePath: row.filePath });
       },
     });
     batches.prune();
@@ -660,17 +683,6 @@ app.get('/:id', async (c) => {
 
     const [transcript] = await db.select().from(transcripts).where(eq(transcripts.recordingId, id)).limit(1);
 
-    let speakerLabels: Record<number, string> = {};
-    if (transcript) {
-      const mappings = await db
-        .select({ speakerId: speakerMappings.speakerId, name: speakerProfiles.name })
-        .from(speakerMappings)
-        .leftJoin(speakerProfiles, eq(speakerMappings.profileId, speakerProfiles.id))
-        .where(eq(speakerMappings.transcriptId, transcript.id));
-
-      speakerLabels = Object.fromEntries(mappings.filter(m => m.name).map(m => [m.speakerId, m.name!]));
-    }
-
     return c.json({
       success: true,
       data: {
@@ -684,7 +696,6 @@ app.get('/:id', async (c) => {
           wordCount: transcript.wordCount,
           speakerCount: transcript.speakerCount,
           confidenceScore: transcript.confidenceScore,
-          speakerLabels,
           summary: transcript.summary,
           extractedTasks: transcript.extractedTasks,
           analyzedAt: transcript.analyzedAt,
@@ -841,6 +852,9 @@ app.post('/:id/reprocess', async (c) => {
       assertPrivacy(readAiConfig(sqlite), config.transcriptionEngine);
       validateSpeechOptions(config.transcriptionEngine, { model: config.transcriptionModel, diarize: config.transcriptionDiarize, vocabulary: config.transcriptionVocabulary });
     } catch { return c.json({ success: false, error: 'Invalid or privacy-blocked transcription options.' }, 400); }
+    // The queue would hand back the in-flight job and drop these options; say so instead of
+    // flipping a running job's status back to pending.
+    if (jobQueue.activeJob('process-recording', id)) return c.json({ success: false, error: 'This recording is already being processed. Cancel that job before reprocessing.' }, 409);
     await db.update(recordings).set({ status: 'pending', errorMessage: null, processedAt: null }).where(eq(recordings.id, id));
     await jobQueue.add('process-recording', { recordingId: id, filePath: recording.filePath, config });
 
@@ -857,12 +871,7 @@ app.post('/:id/reprocess', async (c) => {
 app.post('/sync', async (c) => {
   try {
     const { FolderWatcher } = await import('../sync/folder-watcher');
-    const savedSettings = await db.select().from(userSettings);
-    const settings = Object.fromEntries(savedSettings.map(setting => [setting.key, setting.value]));
-    const syncPath = settings.syncFolderPath?.startsWith('~/')
-      ? `${homedir()}/${settings.syncFolderPath.slice(2)}`
-      : settings.syncFolderPath;
-    const watcher = new FolderWatcher(syncPath);
+    const watcher = new FolderWatcher(await configuredSyncPath() ?? undefined);
     const result = await watcher.syncAll();
     return c.json({ success: true, data: result });
   } catch (error) {
@@ -871,14 +880,6 @@ app.post('/sync', async (c) => {
 });
 
 export default app;
-
-async function configuredSyncPath(): Promise<string | null> {
-  const [setting] = await db.select({ value: userSettings.value }).from(userSettings)
-    .where(eq(userSettings.key, 'syncFolderPath')).limit(1);
-  const raw = setting?.value || process.env.PLAUD_SYNC_PATH;
-  if (!raw) return null;
-  return resolve(raw.startsWith('~/') ? `${homedir()}/${raw.slice(2)}` : raw);
-}
 
 function preserveExtension(title: string, current: string | null): string {
   const extension = current?.match(/\.[^.]+$/)?.[0] ?? '';

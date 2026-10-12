@@ -213,7 +213,8 @@ export function findReplace(
     if (!matches) return segment;
     replacements += matches.length;
     segmentsChanged += 1;
-    return { ...segment, text: segment.text.replace(pattern, replacement) };
+    // A function replacer keeps the replacement literal: `$&`, `$1` and `$$` are not patterns here.
+    return { ...segment, text: segment.text.replace(pattern, () => replacement) };
   });
   return { segments: next, replacements, segmentsChanged };
 }

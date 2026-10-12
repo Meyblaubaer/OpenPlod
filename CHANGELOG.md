@@ -1,5 +1,75 @@
 # Changelog
 
+## Unreleased - 0.7.0 Sprint 1
+
+Knowledge links and a shared job API ([sprint plan and outcome](docs/sprint-0.7.0.md)), plus fixes
+from a correctness and performance audit.
+
+### Added
+
+- **KB-01** document tags and schemaless properties. Tags are freeform and case-insensitive; a tag
+  chip row filters Documents, and the filter composes with folders, views, and search. Properties
+  keep their JSON types and merge by key on update. Migration is additive.
+- **KB-01** resolved sources and backlinks. A note reports whether the transcript version it was
+  written from is still current, has been superseded (`stale`), or can no longer be found
+  (`unknown`), and lists other notes written from the same version. New endpoints:
+  `/api/v1/documents/:id/source`, `/api/v1/tags`, `/api/v1/recordings/:id/transcript-versions`,
+  `/api/v1/transcript-versions/:id`, and `/api/v1/transcript-versions/:id/backlinks`.
+- **KB-06** versioned processing-job API: `GET /api/v1/jobs`, `GET /api/v1/jobs/:id`, and
+  `POST /api/v1/jobs/:id/cancel`, with `startedAt` and produced transcript version ids.
+  `/api/jobs` keeps its shape.
+- **KB-07** read-only MCP tools: `list_tags`, `get_document_source`, `list_transcript_versions`,
+  `get_transcript_version`, `list_transcript_backlinks`, `list_jobs`, and `get_job`.
+
+### Fixed
+
+- Batch transcription offered, and queued, every recording in the library, including ones already
+  transcribed, which could pay for a second transcription. The library list now reports
+  `hasTranscript`, and the batch endpoints skip transcribed recordings.
+- A batch reported items complete without transcribing them when automatic transcription was off
+  or forwarding was on. Batches now queue transcription directly.
+- Recordings imported over Bluetooth were never transcribed, even with "Transcribe after import" on.
+- After a crash, a recording whose transcription was interrupted showed "transcribing" forever; it
+  now shows the failure.
+- A configured fallback transcription provider that lacked a requested option (speaker labels,
+  vocabulary) aborted the whole job instead of being skipped with a reason.
+- Reprocessing while a job was already running reset the recording to `pending` and silently
+  dropped the new options; it now answers `409`.
+- Replacing a recording's audio left it `pending` with the old audio's transcript; it now
+  processes the new audio like an import, and audio in Trash cannot be replaced.
+- Transcript Studio speaker rename, merge, and per-speaker find/replace failed for diarized
+  speakers, and correcting one segment rewrote every speaker label and dropped word timings.
+- Find/replace treated `$&`, `$1`, and `$$` in the replacement as patterns instead of literal text.
+- Subtitle export lost speaker labels after a speaker was renamed.
+- Global search returned recordings in Trash, and its excerpts missed matches when the query's
+  words were not adjacent.
+- Full folder syncs ignored the recording-type filter and re-hashed every file on each sync.
+- Two concurrent imports of the same file could create duplicate recordings.
+- Edits on the recording page were overwritten every few seconds while it was processing, and
+  switching recordings quickly could show the previous one.
+- Document-generation progress events always named Mistral as the provider.
+- Trash retention now also runs every six hours, not only at startup.
+
+### Performance
+
+- Finished processing jobs are pruned after 30 days (at most 1,000 kept) instead of accumulating in
+  memory and the database forever.
+- Playback no longer re-renders the whole transcript on every animation frame in the library
+  preview, or re-parses the Markdown transcript several times a second on the recording page.
+- A pending recording's page polls every 15 seconds instead of every 2.5, and polls no longer
+  download every transcript version's full text.
+- New index for library lists, and an index for document backlinks.
+
+### Removed
+
+- Unused code: the transcription barrel module and its Groq engine, the never-written speaker
+  profile lookup on recording detail (the always-empty `transcript.speakerLabels` field),
+  `saveTranscriptVersion`, `identityFileExists`, `TranscriptionRouter.getEngine`, the unrouted
+  Search page, the unused `api.sync` and `notesApi.snapshot` clients, and a duplicate transcript
+  version client.
+- Tests now run against a throwaway database instead of `./data`, and the Bluetooth environment
+  tests no longer depend on a locally built bridge.
+
 ## 0.6.0 - 2026-09-21
 
 Transcript Studio. Editing, version comparison, reviewed AI operations, structured exports, reusable

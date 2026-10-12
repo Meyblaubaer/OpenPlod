@@ -86,6 +86,12 @@ test('router blocks implicit cloud fallback and diarization rerouting', async ()
   expect((await router.transcribeBuffer(Buffer.from('fixture'), 'audio/wav')).error).toContain('Local-only');
   const selected = new TranscriptionRouter({ primary: 'mistral', fallback: [] }, { mistralApiKey: 'key' });
   await expect(selected.transcribeWithDiarization('/not-read')).rejects.toThrow('speaker labels');
+  // An incompatible fallback is skipped with its reason instead of aborting the whole attempt.
+  const fallback = new TranscriptionRouter({ primary: 'deepgram', fallback: ['mistral'] }, { mistralApiKey: 'key' });
+  const result = await fallback.transcribeFile('/not-read', { diarize: true });
+  expect(result.success).toBe(false);
+  expect(result.error).toContain('deepgram: not configured');
+  expect(result.error).toContain('mistral does not support speaker labels');
 });
 test('Mistral missing confidence and timestamps remain unknown', () => {
   const result = normalizeMistralTranscription({ text: 'Bonjour', segments: [{ text: 'Bonjour' }] });

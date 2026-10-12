@@ -122,3 +122,9 @@ describe('format selection', () => {
     expect(renderSubtitles('vtt', timed)).toContain('WEBVTT');
   });
 });
+
+test('renamed speakers keep their name in labelled cues', () => {
+  const vtt = toVtt([{ start: 0, end: 1, text: 'Hi', speaker: 'Alice' }, { start: 1, end: 2, text: 'Yo', speaker: 0 }], { speakerLabels: true });
+  expect(vtt).toContain('Alice: Hi');
+  expect(vtt).toContain('Speaker 1: Yo');
+});

@@ -246,3 +246,8 @@ describe('operation dispatch', () => {
     expect(() => applyOperation(conversation(), { op: 'nope' } as never)).toThrow(/unsupported/i);
   });
 });
+
+test('replacement text is literal, not a replace pattern', () => {
+  const { segments } = findReplace([{ start: 0, end: 1, text: "ten dollars" }], "dollars", "$$ and $&");
+  expect(segments[0]!.text).toBe('ten $$ and $&');
+});

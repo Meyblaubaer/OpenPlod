@@ -41,9 +41,17 @@ All paths below are relative to `/api/v1`.
 | PATCH | `/folders/:id` | `{ revision, name?, parentId? }`; rejects cycles and duplicate sibling names |
 | DELETE | `/folders/:id` | `{ revision }`; only empty folders, including Trash contents |
 | GET | `/documents` | Paginated summaries; filters described below |
-| POST | `/documents` | `{ title, content?, folderId?, idempotencyKey }` |
-| GET | `/documents/:id` | Complete note including content, source references, revision, retention dates |
-| PATCH | `/documents/:id` | `{ revision, title?, content?, folderId?, starred? }` |
+| POST | `/documents` | `{ title, content?, folderId?, tags?, properties?, idempotencyKey }` |
+| GET | `/documents/:id` | Complete note including content, tags, properties, source references, revision, retention dates |
+| PATCH | `/documents/:id` | `{ revision, title?, content?, folderId?, starred?, tags?, properties? }` |
+| GET | `/documents/:id/source` | The exact transcript version the note cites, resolved: `current`, `stale`, `unknown`, or `none` |
+| GET | `/tags` | Tags on active notes with counts, `[{ tag, count }]` |
+| GET | `/recordings/:id/transcript-versions` | Saved transcript versions, newest first, without text; `current` flag and citing-note count |
+| GET | `/transcript-versions/:id` | One transcript version including `fullText` |
+| GET | `/transcript-versions/:id/backlinks` | `{ version, documents }`: active notes citing exactly this version |
+| GET | `/jobs` | Processing jobs, newest first; see [Processing Jobs](#processing-jobs) |
+| GET | `/jobs/:id` | One job descriptor |
+| POST | `/jobs/:id/cancel` | Cancel exactly this queued or running job |
 | DELETE | `/documents/:id` | `{ revision }`; move to 30-day Trash |
 | POST | `/documents/:id/restore` | `{ revision }`; restore during the retention window |
 | POST | `/documents/:id/purge` | `{ revision, confirm: true }`; permanently remove a trashed note and history |
@@ -53,7 +61,7 @@ All paths below are relative to `/api/v1`.
 | GET | `/documents/:id/export?format=md` | Download exact saved Markdown; `format=json` includes metadata |
 | GET | `/transcripts/:recordingId` | Read source metadata and current transcript; optional `versionId` selects history |
 | POST | `/documents/from-transcript` | `{ recordingId, versionId?, folderId?, title? }`; independent, provenance-linked snapshot |
-| POST | `/documents/generate` | Mistral generation, SSE `progress`, `result`, or `error` events; no note saved yet |
+| POST | `/documents/generate` | AI generation with the configured text provider; SSE `progress` (`{ id, stage }`), `result`, or `error` events; no note saved yet |
 | GET | `/generations/:id` | Private generation result and timestamped processing trace |
 | POST | `/generations/:id/save` | `{ folderId? }`; save reviewed AI output once as a new note |
 | GET | `/destinations` | Configured destination ID, name, and host only; no secrets or full URL |
@@ -65,9 +73,54 @@ All paths below are relative to `/api/v1`.
 - `view=all|starred|trash` (default `all`, excluding Trash).
 - `folderId=<UUID>` for direct members only, or `folderId=inbox` for unfiled notes.
 - `q=<text>` for indexed full-text token-prefix search across titles and Markdown.
+- `tag=<tag>` for notes carrying that tag, compared case-insensitively. Composes with every other filter.
 - `sort=updated|title`, `offset=0`, and `limit=30` (maximum 100).
 
-Response: `{ documents: [...], total, offset, limit }`. Summaries include a short excerpt, not the entire Markdown body. Up to 1,000 folders and 32 nesting levels are supported.
+Response: `{ documents: [...], total, offset, limit }`. Summaries include a short excerpt and the note's `tags`, not the entire Markdown body. Up to 1,000 folders and 32 nesting levels are supported.
+
+## Tags, Properties, and Sources
+
+Tags are freeform: up to 32 per note, 1-64 characters, no commas or control characters. They are trimmed, deduplicated case-insensitively (the first spelling is kept), and returned sorted. Sending `tags` on `PATCH` replaces the whole set; omitting it keeps the current tags.
+
+`properties` is a schemaless JSON object (up to 64 keys, 16 KB). Values are stored verbatim, so a number stays a number and an object stays an object. `PATCH` merges by key: keys you send replace their values, `null` removes a key, and keys you omit are kept. Changing tags or properties creates a new revision and uses the same `409` conflict rule as any other edit.
+
+A note written from a transcript records the exact transcript version it read (a generated note written from "the current transcript" records the version that was current at the time). `GET /documents/:id/source` resolves it:
+
+| `status` | Meaning |
+| --- | --- |
+| `current` | The cited version is the recording's current transcript |
+| `stale` | The cited version still exists, but the transcript has been edited or another version promoted since; `stale: true` |
+| `unknown` | The note names a source that can no longer be found; no substitute text is returned |
+| `none` | The note was not written from a transcript |
+
+The response also carries `recordingId`, `recordingFilename`, `recordingAvailable` (false when the recording is in Trash or gone), `versionId`, `versionOrigin`, `versionCreatedAt`, and `currentVersionId`. Notes keep citing their version after a newer one is promoted; they are never rewritten. Backlinks exclude notes in Trash, and a restored note reappears.
+
+## Processing Jobs
+
+`/api/v1/jobs` is a stable, read-mostly view over the durable processing queue. It never submits work: transcription and forwarding jobs are created by import, reprocess, and batch flows, which keep their per-recording idempotency (a retried submission for a recording with a queued or running job returns that job rather than creating a second one or a second paid call). Fields may be added within `/api/v1`; existing fields keep their meaning.
+
+```json
+{
+  "id": "5f0c…",
+  "type": "process-recording",
+  "state": "complete",
+  "createdAt": "2026-10-12T09:00:00.000Z",
+  "startedAt": "2026-10-12T09:00:01.000Z",
+  "completedAt": "2026-10-12T09:02:10.000Z",
+  "error": null,
+  "recordingId": "8a1e…",
+  "provider": "mistral",
+  "priority": 0,
+  "checkpoint": { "phase": "polling", "remoteId": "provider-job-id" },
+  "resultRefs": { "transcriptVersionIds": ["5f0c…"] }
+}
+```
+
+`state` is `pending`, `running`, `complete`, `failed`, or `cancelled`. `GET /jobs` accepts `state`, `type`, `recordingId`, `offset`, and `limit` (maximum 100) and returns `{ jobs, total, offset, limit, stats }`. Unknown ids return `404` with `code: "job_not_found"`; cancelling a finished job returns `409` with `code: "job_not_cancellable"`. Cancelling affects only the named job, never other work on the same recording.
+
+After a restart, a job interrupted before the provider confirmed receipt is marked `failed` (and its recording shows the failure) rather than resubmitted, because the provider may already have billed it. A job with a known remote id resumes polling. Finished jobs are kept for 30 days (at most 1,000) and pruned at startup.
+
+The older `GET /api/jobs`, `POST /api/jobs/:id/cancel`, `POST /api/jobs/:id/resume`, and `PATCH /api/jobs/:id` keep their shape; job objects there gain an optional `startedAt`.
 
 ## Create and Update a Note
 
@@ -94,7 +147,7 @@ Generation streams truthful workflow stages and returns a reviewable draft. Only
 
 The saved document preserves source recording/version references, a generated initial version, provider/model provenance, and a private generation trace. Subsequent user edits use normal note revisions. Uncommitted generation drafts older than 24 hours are cleaned up when another generation starts; saved traces are removed when their document is permanently purged. These AI outputs can contain mistakes and should be reviewed before saving or sending.
 
-Note history includes saved content and metadata changes. Restoring history copies its title and Markdown into a new revision; it does not rewind the current folder, star state, or source provenance. Expired note Trash is purged when the backend starts. This is retention cleanup, not forensic secure erasure.
+Note history includes saved content and metadata changes. Restoring history copies its title and Markdown into a new revision; it does not rewind the current folder, star state, or source provenance. Expired note and recording Trash is purged when the backend starts and every six hours while it runs. This is retention cleanup, not forensic secure erasure.
 
 ## Send to a Destination
 
@@ -159,7 +212,7 @@ Without `format`, returns whether the saved transcript can become subtitles:
 | --- | --- |
 | `format=srt\|vtt` | Download the subtitle file instead of the readiness report |
 | `versionId=<id>` | Export a stored transcript version rather than the current one |
-| `speakerLabels=1` | Prefix each cue with `Speaker N:` when the transcript has diarization |
+| `speakerLabels=1` | Prefix each cue with `Speaker N:` for diarized speakers, or the speaker's name once renamed |
 
 Returns `409` with the refusal reason when a format is requested for a transcript without usable
 timings; timings are never invented or interpolated. `400` for an unsupported format, `404` when no

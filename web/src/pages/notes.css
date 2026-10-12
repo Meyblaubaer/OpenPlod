@@ -167,3 +167,43 @@
   .document-inspector { right: 36px; width: min(230px, calc(100% - 36px)); }
   .notes-workspace[data-document=true] .notes-folders { display: none; }
 }
+
+/* Knowledge links (0.7.0 KB-01): tags, properties, and the resolved source. */
+.notes-tag-filter { display: flex; gap: 6px; margin: -2px 14px 10px; overflow-x: auto; scrollbar-width: none; }
+.notes-tag-filter button { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; padding: 3px 8px; font-size: 11px; color: var(--muted-foreground); border: 1px solid var(--border); border-radius: 999px; }
+.notes-tag-filter button small { font-size: 10px; opacity: 0.7; }
+.notes-tag-filter button[aria-pressed=true] { background: var(--accent); color: var(--accent-foreground); border-color: color-mix(in srgb, var(--primary) 40%, transparent); }
+.notes-list-tags { display: flex; gap: 4px; margin-top: 3px; overflow: hidden; }
+.notes-list-tags i { font-style: normal; font-size: 10px; padding: 0 5px; border-radius: 3px; background: var(--muted); color: var(--muted-foreground); white-space: nowrap; }
+.notes-metadata { border-bottom: 1px solid var(--border); padding: 4px 18px; font-size: 11px; color: var(--muted-foreground); }
+.notes-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 28px; }
+.notes-tags > svg { width: 13px; height: 13px; flex-shrink: 0; }
+.notes-tag { display: inline-flex; align-items: center; gap: 2px; padding: 1px 2px 1px 7px; border-radius: 999px; background: var(--accent); color: var(--accent-foreground); }
+.notes-tag button { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 999px; }
+.notes-tag button svg { width: 10px; height: 10px; }
+.notes-tags input { flex: 1; min-width: 80px; font-size: 11px; background: transparent; padding: 3px 2px; outline: none; }
+.notes-links summary { display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 4px 0; list-style: none; }
+.notes-links summary::-webkit-details-marker { display: none; }
+.notes-links summary svg { width: 13px; height: 13px; }
+.notes-links summary small { margin-left: auto; }
+.notes-links-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 24px; padding: 6px 0 10px; }
+.notes-links-body h3 { font-size: 11px; font-weight: 600; color: var(--foreground); margin-bottom: 6px; }
+.notes-links-body h4 { font-size: 11px; font-weight: 500; margin: 8px 0 4px; }
+.notes-links-empty { font-style: italic; }
+.notes-properties > div { display: grid; grid-template-columns: minmax(60px, 35%) 1fr 20px; align-items: start; gap: 8px; padding: 3px 0; border-top: 1px solid var(--border); }
+.notes-properties dt { color: var(--foreground); overflow-wrap: anywhere; }
+.notes-properties dd { overflow-wrap: anywhere; }
+.notes-properties code { font-size: 10px; }
+.notes-properties button, .notes-property-form button { display: grid; place-items: center; width: 20px; height: 20px; }
+.notes-properties button svg, .notes-property-form button svg { width: 12px; height: 12px; }
+.notes-property-form { display: grid; grid-template-columns: minmax(60px, 35%) 1fr 20px; gap: 8px; margin-top: 6px; }
+.notes-property-form input { min-width: 0; font-size: 11px; padding: 4px 6px; border: 1px solid var(--input); border-radius: 4px; background: var(--background); }
+.notes-source-status { font-weight: 500; color: var(--foreground); }
+.notes-source-status[data-status=stale] { color: var(--neutral); }
+.notes-source-status[data-status=unknown] { color: var(--destructive); }
+.notes-source-detail { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-top: 4px; }
+.notes-source-detail svg { width: 13px; height: 13px; }
+.notes-source-detail a { color: var(--pine); }
+.notes-backlinks { display: grid; gap: 2px; }
+.notes-backlinks button { color: var(--pine); text-align: left; }
+@media (max-width: 720px) { .notes-metadata { padding-inline: 12px; } }

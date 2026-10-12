@@ -21,7 +21,6 @@ export class TranscriptionRouter {
     ]);
   }
   status(): Record<EngineName, boolean> { return Object.fromEntries([...this.engines].map(([name, engine]) => [name, engine.isAvailable()])) as Record<EngineName, boolean>; }
-  getEngine(name: EngineName) { return this.engines.get(name); }
   private async run(call: (engine: TranscriptionEngine, options: TranscriptionOptions) => Promise<TranscriptionResult>, options?: TranscriptionOptions) {
     const errors: string[] = [];
     for (const [index, name] of [...new Set([this.config.primary, ...this.config.fallback])].entries()) {
@@ -33,7 +32,12 @@ export class TranscriptionRouter {
       // Model identifiers and remote job IDs never cross provider boundaries.
       const opts = { ...this.config.defaults, ...options, ...(index ? { model: undefined, checkpoint: undefined } : {}) };
       if (opts.language === 'auto') opts.language = undefined;
-      validateSpeechOptions(name, opts);
+      // A fallback that cannot honour the requested options is skipped, never run with
+      // features silently dropped; an incompatible primary still fails loudly.
+      if (index) {
+        try { validateSpeechOptions(name, opts); }
+        catch (error) { errors.push(error instanceof Error ? error.message : `${name}: unsupported options`); continue; }
+      } else validateSpeechOptions(name, opts);
       const result = await call(engine, opts);
       options?.signal?.throwIfAborted();
       if (result.success) return result;

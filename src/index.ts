@@ -22,14 +22,14 @@ import { automaticPlaud } from './api/plaud';
 import { recordings, userSettings } from './db/schema';
 import { eq } from 'drizzle-orm';
 import { searchTranscripts } from './search/transcripts';
-import { homedir } from 'os';
 import plaudApi from './api/plaud';
 import mobileApi from './api/mobile';
 import transcriptsApi from './api/transcripts';
-import { purgeExpiredTrash } from './library/recording-library';
+import { configuredSyncPath, purgeExpiredTrash } from './library/recording-library';
 import { saveGeneratedTranscript } from './library/transcript-history';
 import { forwardRecordingWithRetry } from './library/forwarding';
 import { createAiSettingsApi } from './api/ai-settings';
+import { createJobsApi } from './api/jobs';
 import { aiConfigSchema, readAiConfig, readSettings, assertPrivacy } from './ai/config';
 import packageInfo from '../package.json';
 
@@ -164,7 +164,7 @@ app.route('/api/plaud', plaudApi);
 app.route('/api/mobile', mobileApi);
 app.route('/api/transcripts', transcriptsApi);
 const organizer = new OrganizerStore(sqlite);
-organizer.purgeExpired();
+app.route('/api/v1/jobs', createJobsApi(jobQueue, sqlite));
 app.route('/api/v1', createOrganizerApi(organizer));
 app.route('/api/ai', createRecordingAiApi(new RecordingAi(organizer)));
 app.route('/api/ai-settings', createAiSettingsApi(sqlite));
@@ -262,10 +262,7 @@ async function startFolderSync() {
     console.log('[Startup] Automatic folder import is disabled');
     return;
   }
-  const configuredPath = settings.syncFolderPath?.startsWith('~/')
-    ? `${homedir()}/${settings.syncFolderPath.slice(2)}`
-    : settings.syncFolderPath;
-  const watcher = new FolderWatcher(configuredPath);
+  const watcher = new FolderWatcher(await configuredSyncPath() ?? undefined);
   if (!watcher.isConfigured()) return;
 
   watcher.startWatching();
@@ -275,9 +272,15 @@ async function startFolderSync() {
 
 void startFolderSync().catch(error => console.error('[Startup] Folder sync failed:', error));
 setInterval(() => { void automaticPlaud.tick(); }, 60000).unref();
-void purgeExpiredTrash().then(count => {
-  if (count > 0) console.log(`[Retention] Purged ${count} expired recording(s)`);
-}).catch(error => console.error('[Retention] Trash purge failed:', error));
+// 30-day Trash retention must hold for a long-running server too, not only at startup.
+function purgeTrash() {
+  try { organizer.purgeExpired(); } catch (error) { console.error('[Retention] Note trash purge failed:', error); }
+  void purgeExpiredTrash().then(count => {
+    if (count > 0) console.log(`[Retention] Purged ${count} expired recording(s)`);
+  }).catch(error => console.error('[Retention] Trash purge failed:', error));
+}
+purgeTrash();
+setInterval(purgeTrash, 6 * 3600 * 1000).unref();
 
 const port = parseInt(process.env.PORT || '3487', 10);
 const hostname = process.env.HOST || '127.0.0.1';

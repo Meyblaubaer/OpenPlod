@@ -186,3 +186,125 @@ describe('confirmed destination deliveries', () => {
     await expect(insecure.send(document.id, { ...input, destinationId: 'http', idempotencyKey: crypto.randomUUID() })).rejects.toThrow();
   });
 });
+
+describe('knowledge links (0.7.0 KB-01)', () => {
+  const sourceTables = () => database.exec(`
+    CREATE TABLE recordings (id TEXT PRIMARY KEY, original_filename TEXT, recorded_at TEXT, source_provider TEXT, retention_state TEXT);
+    CREATE TABLE transcripts (recording_id TEXT, current_version_id TEXT, full_text TEXT, origin TEXT);
+    CREATE TABLE transcript_versions (id TEXT PRIMARY KEY, recording_id TEXT, full_text TEXT, origin TEXT, provenance TEXT, created_at TEXT);`);
+  const addVersion = (recordingId: string, text: string, createdAt: string) => {
+    const id = crypto.randomUUID();
+    database.query('INSERT INTO transcript_versions VALUES(?,?,?,?,?,?)').run(id, recordingId, text, 'generated', JSON.stringify({ provider: 'mistral', model: 'voxtral' }), createdAt);
+    return id;
+  };
+  const recordingWithVersion = () => {
+    sourceTables();
+    const recordingId = crypto.randomUUID();
+    database.query('INSERT INTO recordings VALUES(?,?,?,?,?)').run(recordingId, 'standup.m4a', '2026-10-01', 'plaud', 'active');
+    const versionId = addVersion(recordingId, 'First pass', '2026-10-01T10:00:00Z');
+    database.query('INSERT INTO transcripts VALUES(?,?,?,?)').run(recordingId, versionId, 'First pass', 'generated');
+    return { recordingId, versionId };
+  };
+
+  test('tags and properties round-trip, and an update that omits them preserves them', () => {
+    const created = note({ tags: [' Roadmap ', 'roadmap', 'Q4'], properties: { status: 'draft', score: 3, flags: { pinned: true }, owners: ['a', 'b'] } });
+    expect(created.tags).toEqual(['Q4', 'Roadmap']);
+    expect(created.properties).toEqual({ status: 'draft', score: 3, flags: { pinned: true }, owners: ['a', 'b'] });
+    const edited = store.update(created.id, { revision: 1, content: 'changed' });
+    expect(edited.tags).toEqual(['Q4', 'Roadmap']);
+    expect(edited.properties.score).toBe(3);
+    expect(typeof store.get(created.id).properties.score).toBe('number');
+  });
+  test('property updates merge by key, null removes a key, and unknown keys survive', () => {
+    const created = note({ properties: { keep: 'yes', drop: 1 } });
+    const merged = store.update(created.id, { revision: 1, properties: { drop: null, added: false } });
+    expect(merged.properties).toEqual({ keep: 'yes', added: false });
+    expect(merged.revision).toBe(2);
+    expect(store.update(created.id, { revision: 2, properties: { keep: 'yes' } }).revision).toBe(2);
+    expect(() => store.update(created.id, { revision: 1, tags: ['stale'] })).toThrow('changed elsewhere');
+  });
+  test('rejects oversized and malformed tags', () => {
+    expect(() => note({ tags: ['a,b'] })).toThrow();
+    expect(() => note({ tags: ['x'.repeat(65)] })).toThrow();
+    expect(() => note({ tags: Array.from({ length: 33 }, (_, index) => `t${index}`) })).toThrow();
+    expect(() => note({ properties: { big: 'x'.repeat(17000) } })).toThrow('16 KB');
+  });
+  test('tag filter is case-insensitive, composes with folder, view and search, and excludes Trash', () => {
+    const target = folder();
+    const inFolder = note({ tags: ['Client'], folderId: target.id, content: 'quarterly budget' });
+    note({ tags: ['client'], content: 'hiring plan' });
+    note({ tags: ['other'] });
+    const trashed = note({ tags: ['CLIENT'] }); store.trash(trashed.id, 1);
+    expect(store.list({ tag: 'CLIENT' }).total).toBe(2);
+    expect(store.list({ tag: 'client', folderId: target.id }).documents.map(row => row.id)).toEqual([inFolder.id]);
+    expect(store.list({ tag: 'client', q: 'budget' }).documents.map(row => row.id)).toEqual([inFolder.id]);
+    expect(store.list({ tag: 'client', view: 'trash' }).documents.map(row => row.id)).toEqual([trashed.id]);
+    expect(store.list({ tag: 'client', limit: 1, offset: 1 })).toMatchObject({ total: 2, documents: [expect.any(Object)] });
+    expect(store.tags()).toEqual([{ tag: 'Client', count: 2 }, { tag: 'other', count: 1 }]);
+  });
+  test('migration adds properties to an existing vault without changing documents', () => {
+    const legacy = new Database(':memory:');
+    legacy.exec(`CREATE TABLE note_documents (id TEXT PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL, folder_id TEXT, starred INTEGER NOT NULL DEFAULT 0,
+      revision INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT, source_recording_id TEXT, source_version_id TEXT,
+      source_origin TEXT, snapshot_key TEXT UNIQUE, idempotency_key TEXT UNIQUE, request_hash TEXT)`);
+    const id = crypto.randomUUID();
+    legacy.query("INSERT INTO note_documents(id,title,content,created_at,updated_at) VALUES(?, 'Old', '# Kept', '2026-01-01', '2026-01-01')").run(id);
+    initializeOrganizer(legacy); initializeOrganizer(legacy);
+    expect(new OrganizerStore(legacy).get(id)).toMatchObject({ title: 'Old', content: '# Kept', revision: 1, tags: [], properties: {} });
+    legacy.close();
+  });
+  test('a document keeps citing its version after a newer one is promoted, and reports stale', () => {
+    const { recordingId, versionId } = recordingWithVersion();
+    const saved = store.snapshot({ recordingId, versionId });
+    expect(store.source(saved.id)).toMatchObject({ status: 'current', stale: false, versionId, recordingFilename: 'standup.m4a', recordingAvailable: true });
+    const newer = addVersion(recordingId, 'Edited pass', '2026-10-02T10:00:00Z');
+    database.query('UPDATE transcripts SET current_version_id=?, full_text=?').run(newer, 'Edited pass');
+    expect(store.source(saved.id)).toMatchObject({ status: 'stale', stale: true, versionId, currentVersionId: newer });
+    expect(store.get(saved.id).sourceVersionId).toBe(versionId);
+  });
+  test('missing sources are unknown and unsourced documents are none, never a substitute', () => {
+    const { recordingId, versionId } = recordingWithVersion();
+    const saved = store.snapshot({ recordingId, versionId });
+    database.query('DELETE FROM transcript_versions WHERE id=?').run(versionId);
+    expect(store.source(saved.id)).toMatchObject({ status: 'unknown', stale: null, versionId, versionOrigin: null });
+    database.query('DELETE FROM recordings').run();
+    expect(store.source(saved.id)).toMatchObject({ status: 'unknown', recordingFilename: null });
+    expect(store.source(note().id)).toMatchObject({ status: 'none', stale: null, recordingId: null });
+  });
+  test('backlinks list citing documents, drop trashed ones, and restore them', async () => {
+    const { recordingId, versionId } = recordingWithVersion();
+    const cited = store.snapshot({ recordingId, versionId });
+    const other = addVersion(recordingId, 'Other', '2026-10-03T10:00:00Z');
+    expect(store.backlinks(versionId).documents.map(row => row.id)).toEqual([cited.id]);
+    expect(store.backlinks(other).documents).toEqual([]);
+    store.trash(cited.id, 1);
+    expect(store.backlinks(versionId).documents).toEqual([]);
+    store.restore(cited.id, 2);
+    expect(store.backlinks(versionId).documents.map(row => row.id)).toEqual([cited.id]);
+    expect(store.transcriptVersions(recordingId)).toMatchObject([
+      { id: other, current: false, documentCount: 0, provider: 'mistral' },
+      { id: versionId, current: true, documentCount: 1, model: 'voxtral' },
+    ]);
+    expect(store.transcriptVersion(versionId).fullText).toBe('First pass');
+    expect(() => store.backlinks(crypto.randomUUID())).toThrow('not found');
+    const response = await apiRequest(`/transcript-versions/${crypto.randomUUID()}`, undefined, 'GET');
+    expect(response.status).toBe(404);
+    expect(await (await apiRequest(`/documents/${cited.id}/source`, undefined, 'GET')).json()).toMatchObject({ data: { status: 'current' } });
+  });
+  test('list and backlink queries stay bounded as the vault grows (MNT)', () => {
+    const { recordingId, versionId } = recordingWithVersion();
+    const statements = () => {
+      let count = 0;
+      const original = database.query.bind(database);
+      database.query = ((sql: string) => { count++; return original(sql); }) as typeof database.query;
+      try { store.list({ limit: 100 }); store.backlinks(versionId); store.transcriptVersions(recordingId); }
+      finally { database.query = original; }
+      return count;
+    };
+    for (let index = 0; index < 3; index++) store.snapshot({ recordingId, versionId, title: `Copy ${index}` });
+    const small = statements();
+    for (let index = 0; index < 40; index++) note({ tags: [`tag-${index}`, 'shared'] });
+    for (let index = 0; index < 40; index++) addVersion(recordingId, `v${index}`, `2026-10-04T10:${String(index).padStart(2, '0')}:00Z`);
+    expect(statements()).toBe(small);
+  });
+});

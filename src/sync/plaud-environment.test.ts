@@ -1,4 +1,7 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { audioToolsAvailable, detectPlaudEnvironment, readDoctorReport } from './plaud-environment';
 import { bluetoothBackend, BLUETOOTH_BACKENDS, bridgeBackend, usesSwiftBridge } from './plaud-bridge';
 
@@ -19,6 +22,22 @@ function stubSpawn(responses: Record<string, { stdout?: string; code?: number } 
   };
   return { spawn, calls };
 }
+
+// Bridge discovery checks the filesystem, so point it at a stub file; the
+// stubbed spawner answers for it. Without this the suite depends on whether
+// `plaud-bridge` has been built on the machine running it.
+const stubBridgeDir = mkdtempSync(join(tmpdir(), 'openplod-bridge-'));
+const previousBridge = process.env.OPENPLOD_BLE_BRIDGE;
+beforeAll(() => {
+  const stub = join(stubBridgeDir, 'plaud-bridge');
+  writeFileSync(stub, '');
+  process.env.OPENPLOD_BLE_BRIDGE = stub;
+});
+afterAll(() => {
+  if (previousBridge === undefined) delete process.env.OPENPLOD_BLE_BRIDGE;
+  else process.env.OPENPLOD_BLE_BRIDGE = previousBridge;
+  rmSync(stubBridgeDir, { recursive: true, force: true });
+});
 
 const workingTools = { ffmpeg: { stdout: 'ffmpeg version 7.1' }, ffprobe: { stdout: 'ffprobe version 7.1' } };
 const healthyDoctor = {

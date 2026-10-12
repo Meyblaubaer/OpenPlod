@@ -1,15 +1,22 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Pencil, Save, X } from "@/components/icons"
 import { Button } from './ui/button'
 import { api, type Recording, type TranscriptSegment } from '@/lib/api'
-export function SegmentEditor({ recording, segment, onSaved }: { recording: Recording; segment: TranscriptSegment; onSaved: () => Promise<void> }) {
+// Memoized so playback ticks on the recording page do not re-render one dialog per segment.
+export const SegmentEditor = memo(function SegmentEditor({ recording, segment, onSaved }: { recording: Recording; segment: TranscriptSegment; onSaved: () => Promise<void> }) {
   const [open, setOpen] = useState(false), [text, setText] = useState(segment.text), [speaker, setSpeaker] = useState(segment.speaker)
   const [busy, setBusy] = useState(false), [error, setError] = useState('')
   const save = async () => {
     setBusy(true); setError('')
     try {
-      const segments = (recording.segments || []).map(s => ({ start: s.startTime, end: s.endTime, text: s.id === segment.id ? text : s.text, speaker: s.speaker === segment.speaker ? speaker : s.speaker }))
+      // Send stored speaker values and word timings back unchanged; only a renamed label replaces its speaker.
+      const renamed = speaker.trim() !== segment.speaker
+      const segments = (recording.segments || []).map(s => {
+        const value = renamed && String(s.speakerId) === String(segment.speakerId) ? speaker.trim() : s.speakerId
+        return { start: s.startTime, end: s.endTime, text: s.id === segment.id ? text : s.text,
+          ...(value === null ? {} : { speaker: value }), ...(s.words ? { words: s.words } : {}) }
+      })
       await api.updateTranscript(recording.id, segments.map(s => s.text).join('\n\n'), recording.revision, segments)
       await onSaved(); setOpen(false)
     } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
@@ -21,4 +28,4 @@ export function SegmentEditor({ recording, segment, onSaved }: { recording: Reco
     <label className="text-sm">Transcript<textarea className="block border rounded p-2 w-full mt-1 mb-4" rows={6} maxLength={50000} value={text} onChange={e => setText(e.target.value)} /></label>
     {error && <p role="alert" className="device-error">{error}</p>}<Button disabled={busy || !text.trim() || !speaker.trim()} onClick={() => void save()}><Save />Save version</Button>
   </Dialog.Content></Dialog.Portal></Dialog.Root>
-}
+})

@@ -160,6 +160,8 @@ export function initializeDatabase() {
     })();
   }
 
+  // Library and transcript lists filter by retention and sort by recording date.
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_recordings_retention_recorded ON recordings(retention_state, recorded_at DESC)');
   sqlite.transaction(() => initializeOrganizer(sqlite))();
   sqlite.exec('PRAGMA optimize');
 }

@@ -2,11 +2,41 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Planned |
+| Status | Implemented 2026-10-12; milestone exit gate not run |
 | Window | 2026-09-22 to 2026-10-05 (two weeks) |
 | Milestone | 0.7.0 - Knowledge, Chat, and Automation |
 | Base | 0.6.0 Transcript Studio, plus the batched-lookup maintenance pass (`780d5a7`) |
 | Roadmap items | KB-01, KB-06, KB-07 |
+
+## Outcome
+
+Everything committed below is implemented with automated tests. Nothing here marks a roadmap
+checkbox complete; KB-01, KB-06, and KB-07 stay open until the 0.7.0 exit gate.
+
+| ID | Result | Evidence |
+| --- | --- | --- |
+| KB-01a | Done. Additive `properties` column and `note_tags` table; tag filter on `list()`, `/tags`, Notes tag chips and editor, property editor | `src/organizer/organizer.test.ts` (round-trip, merge, verbatim values, filter composition, Trash, pagination, legacy-vault migration) |
+| KB-01b | Done. `note_documents_source` index, `/documents/:id/source`, `/recordings/:id/transcript-versions`, `/transcript-versions/:id[/backlinks]`, Notes Source panel | organizer tests (stale after promotion, unknown, none, backlinks drop/restore with Trash); browser check of the panel at desktop and phone width |
+| KB-06 | Done. `/api/v1/jobs`, `/jobs/:id`, `/jobs/:id/cancel` with `startedAt` and `resultRefs`; `/api/jobs` unchanged plus `startedAt` | `src/api/jobs.test.ts` (order, filters, pagination, 404/409, cancel scope, idempotent resubmission, restart, pruning) |
+| KB-07 | Done. `list_tags`, `get_document_source`, `list_transcript_versions`, `get_transcript_version`, `list_transcript_backlinks`, `list_jobs`, `get_job` | `src/mcp/server.test.ts` (present without the write flag, GET-only, no provider call, unknown ids are errors) |
+| MNT | Done. Statement-count regression test over list, backlinks, and versions | organizer test "stay bounded as the vault grows" |
+
+Decisions taken on the open questions below: tags are freeform; properties are schemaless and
+merge by key (`null` removes a key); the job API lives under `/api/v1` with `/api/jobs` kept;
+backlinks are indexed per transcript version, with a recording-scoped version list carrying each
+version's citing-note count.
+
+Not claimed:
+
+- **Per-client cancellation.** The vault has one credential, so it cannot tell clients apart.
+  `POST /jobs/:id/cancel` cancels exactly the named job and nothing else on the same recording;
+  true per-client scoping needs client identities first.
+- **`resultRefs`** only lists transcript versions. Document generation runs outside the queue and
+  forwarding produces no local artifact, so neither has refs yet.
+- Recording collections and saved views (the rest of KB-01) remain deferred.
+
+The same pass fixed defects found in a code audit; they are listed under *Unreleased* in the
+[changelog](../CHANGELOG.md).
 
 ## Sprint Goal
 
