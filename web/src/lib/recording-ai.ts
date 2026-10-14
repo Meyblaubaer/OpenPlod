@@ -1,10 +1,16 @@
 import { apiUrl, authenticatedHeaders } from './runtime'
 import type { AiAnswer } from '../../../src/organizer/recording-ai-types'
 export type { AiAnswer } from '../../../src/organizer/recording-ai-types'
-export type AiConversation = { id: string; question: string; recordingIds: string[]; createdAt: string }
-export async function aiRequest<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(apiUrl(`/ai${path}`), { headers: authenticatedHeaders(), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000) })
-  const body = await response.json(); if (!response.ok || !body.success) throw new Error(body.error || 'AI workspace unavailable.'); return body.data
+export type { AiConversationSummary as AiConversation } from '../../../src/organizer/recording-ai-types'
+export async function aiRequest<T>(path: string, signal?: AbortSignal, init: { method?: string; body?: unknown } = {}): Promise<T> {
+  const response = await fetch(apiUrl(`/ai${path}`), { method: init.method || 'GET', headers: authenticatedHeaders(init.body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000) })
+  const body = await response.json().catch(() => null); if (!response.ok || !body?.success) throw new Error(body?.error || 'AI workspace unavailable.'); return body.data
+}
+/** The complete saved conversation as Markdown or JSON, with resolved source references. */
+export async function conversationExport(id: string, format: 'md' | 'json'): Promise<string> {
+  const response = await fetch(apiUrl(`/ai/conversations/${id}/export?format=${format}`), { headers: authenticatedHeaders(), signal: AbortSignal.timeout(15000) })
+  if (!response.ok) { const body = await response.json().catch(() => null); throw new Error(body?.error || 'Conversation export failed.') }
+  return response.text()
 }
 export async function askRecordings(data: { id: string; conversationId: string; recordingIds: string[]; question: string; consent: true; expectedProvider?: string }, onStage: (stage: string) => void, signal: AbortSignal): Promise<AiAnswer> {
   const response = await fetch(apiUrl('/ai/ask'), { method: 'POST', headers: authenticatedHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(data), signal: AbortSignal.any([signal, AbortSignal.timeout(110000)]) })

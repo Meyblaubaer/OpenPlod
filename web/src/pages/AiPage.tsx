@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { ArrowUp, ChevronDown, Download, FileAudio, Loader2, MessageSquare, Plus, Square, ListTree, History, Copy, RefreshCw, X, FileText, ListChecks, Check } from '@/components/icons'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { Archive, ArrowUp, ChevronDown, Download, FileAudio, Loader2, MessageSquare, MoreHorizontal, Pencil, Plus, Square, ListTree, History, Copy, RefreshCw, RotateCcw, X, FileText, ListChecks, Check } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/icon-button'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api, type TranscriptDocument } from '@/lib/api'
-import { aiRequest, askRecordings, type AiAnswer, type AiConversation } from '@/lib/recording-ai'
+import { aiRequest, askRecordings, conversationExport, type AiAnswer, type AiConversation } from '@/lib/recording-ai'
 import { exportDocument } from '@/lib/document-export'
 import { formatDuration } from '@/lib/utils'
 import './ai.css'
@@ -38,6 +39,8 @@ export function AiPage() {
   const [panelOpen, setPanelOpen] = useState(() => window.innerWidth > 767)
   const [historyError, setHistoryError] = useState('')
   const [historyRefresh, setHistoryRefresh] = useState(0)
+  const [showArchived, setShowArchived] = useState(false)
+  const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
   const [opening, setOpening] = useState(false)
   const [copied, setCopied] = useState('')
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -57,9 +60,19 @@ export function AiPage() {
   useEffect(() => {
     const controller = new AbortController()
     setHistoryError('')
-    aiRequest<AiConversation[]>('/conversations', controller.signal).then(rows => { if (!controller.signal.aborted) setConversations(rows) }).catch(e => { if (!controller.signal.aborted) setHistoryError(e.message) })
+    aiRequest<AiConversation[]>(`/conversations?archived=${showArchived}`, controller.signal).then(rows => { if (!controller.signal.aborted) setConversations(rows) }).catch(e => { if (!controller.signal.aborted) setHistoryError(e.message) })
     return () => controller.abort()
-  }, [historyRefresh])
+  }, [historyRefresh, showArchived])
+  const updateConversation = async (id: string, data: { title?: string | null; archived?: boolean }) => {
+    setHistoryError('')
+    try { await aiRequest<AiConversation>(`/conversations/${id}`, undefined, { method: 'PATCH', body: data }); setRenaming(null); setHistoryRefresh(value => value + 1) }
+    catch (e) { setHistoryError((e as Error).message) }
+  }
+  const exportConversation = async (row: AiConversation, format: 'md' | 'json') => {
+    setHistoryError('')
+    try { await exportDocument({ filename: `openplod-conversation-${row.id}.${format}`, mime: format === 'md' ? 'text/markdown' : 'application/json', content: await conversationExport(row.id, format) }) }
+    catch (e) { setHistoryError((e as Error).message) }
+  }
   useEffect(() => { if (answers.length || stage) end.current?.scrollIntoView({ block: 'nearest' }) }, [answers, stage])
   const fresh = () => { request.current++; active.current?.abort(); active.current = null; setStage(''); setOpening(false); setConversationId(crypto.randomUUID()); setAnswers([]); setError('') }
   const send = async () => {
@@ -106,10 +119,24 @@ export function AiPage() {
         {!loading && !recordings.length && <p className="ai-empty-copy">No transcripts yet. <Link to="/">Open recordings</Link></p>}
         {loading && <Loader2 className="size-4 animate-spin" aria-label="Loading transcripts" />}
         {more && <Button variant="ghost" size="sm" disabled={loading} onClick={() => void loadMore()}>{loading ? <Loader2 className="animate-spin" /> : <ChevronDown />}Load more recordings</Button>}
-        </> : <div className="ai-history"><header><h2>Recent conversations</h2><IconButton label="Refresh conversations" onClick={() => setHistoryRefresh(v => v + 1)}><RefreshCw /></IconButton></header>
+        </> : <div className="ai-history"><header><h2>{showArchived ? 'Archived conversations' : 'Recent conversations'}</h2><div><IconButton label={showArchived ? 'Show recent conversations' : 'Show archived conversations'} aria-pressed={showArchived} onClick={() => { setRenaming(null); setShowArchived(v => !v) }}><Archive /></IconButton><IconButton label="Refresh conversations" onClick={() => setHistoryRefresh(v => v + 1)}><RefreshCw /></IconButton></div></header>
         {historyError && <p className="ai-history-error" role="alert">{historyError}</p>}
-        {conversations.map(row => <button className={`ai-history-row ${row.id === conversationId ? 'selected' : ''}`} key={row.id} disabled={!!stage} onClick={() => void open(row)}><MessageSquare /><span>{row.question}<small>{new Date(row.createdAt).toLocaleDateString()}</small></span></button>)}
-        {!conversations.length && !historyError && <p className="ai-empty-copy">No saved conversations.</p>}</div>}
+        {conversations.map(row => renaming?.id === row.id
+          ? <form key={row.id} className="ai-history-rename" onSubmit={e => { e.preventDefault(); void updateConversation(row.id, { title: renaming.title.trim() || null }) }}>
+            <input autoFocus aria-label="Conversation title" placeholder={row.question} maxLength={120} value={renaming.title} onChange={e => setRenaming({ id: row.id, title: e.target.value })} onKeyDown={e => { if (e.key === 'Escape') setRenaming(null) }} />
+            <IconButton type="submit" label="Save title"><Check /></IconButton><IconButton type="button" label="Cancel rename" onClick={() => setRenaming(null)}><X /></IconButton>
+          </form>
+          : <div key={row.id} className={`ai-history-item ${row.id === conversationId ? 'selected' : ''}`}>
+            <button className="ai-history-row" disabled={!!stage} onClick={() => void open(row)}><MessageSquare /><span>{row.title || row.question}<small>{new Date(row.createdAt).toLocaleDateString()} / {row.turns} question{row.turns === 1 ? '' : 's'}</small></span></button>
+            <DropdownMenu.Root><DropdownMenu.Trigger asChild><IconButton label="Conversation actions"><MoreHorizontal /></IconButton></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="action-menu" align="end">
+              <DropdownMenu.Item onSelect={() => setRenaming({ id: row.id, title: row.title || '' })}><Pencil />Rename</DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={() => void updateConversation(row.id, { archived: !row.archived })}>{row.archived ? <RotateCcw /> : <Archive />}{row.archived ? 'Restore from archive' : 'Archive'}</DropdownMenu.Item>
+              <DropdownMenu.Separator />
+              <DropdownMenu.Item onSelect={() => void exportConversation(row, 'md')}><Download />Export Markdown</DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={() => void exportConversation(row, 'json')}><FileText />Export JSON</DropdownMenu.Item>
+            </DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>
+          </div>)}
+        {!conversations.length && !historyError && <p className="ai-empty-copy">{showArchived ? 'No archived conversations.' : 'No saved conversations.'}</p>}</div>}
       </aside>
       <section className="ai-conversation" aria-label="Conversation">
         <div className="ai-messages">

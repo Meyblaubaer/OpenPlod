@@ -116,6 +116,14 @@ Use a separate analysis adapter contract. A provider supporting text analysis is
 > source/version and job-status tools (KB-07) are implemented and tested. Per-client job
 > cancellation, recording collections, and saved views are not. KB-02, KB-04, KB-05, KB-08,
 > KB-09, and KB-10 are deferred. No checkbox below is marked complete by the sprint alone.
+>
+> **Sprint 2 (implemented 2026-10-14).** See the [0.7.0 Sprint 2 plan and outcome](docs/sprint-0.7.0-2.md).
+> Saved document views (part of KB-01), a one-way managed Markdown export with a manifest,
+> conflict detection, and no silent overwrites (part of KB-02), conversation rename, archive, and
+> complete export (part of KB-03), and MCP view/export-status tools (KB-07) are implemented and
+> tested. Recording collections, export attachments, a desktop folder picker, pinned sources,
+> project context, and follow-up questions are not. KB-04, KB-05, KB-08, KB-09, and KB-10
+> remain deferred.
 
 - [ ] **KB-01:** Add document properties, document tags, recording collections, saved views, and backlinks between documents and exact transcript versions.
 - [ ] **KB-02:** Add managed Markdown export to a chosen filesystem/Obsidian folder, with attachments, source links, collision detection, and an export manifest. Start one-way; never overwrite externally edited files silently.

@@ -46,6 +46,12 @@ All paths below are relative to `/api/v1`.
 | PATCH | `/documents/:id` | `{ revision, title?, content?, folderId?, starred?, tags?, properties? }` |
 | GET | `/documents/:id/source` | The exact transcript version the note cites, resolved: `current`, `stale`, `unknown`, or `none` |
 | GET | `/tags` | Tags on active notes with counts, `[{ tag, count }]` |
+| GET | `/views` | Saved document views, by name; see [Saved Views](#saved-views) |
+| POST | `/views` | `{ name, filters }`; filters are the `GET /documents` filters without pagination |
+| PATCH | `/views/:id` | `{ revision, name?, filters? }` |
+| DELETE | `/views/:id` | `{ revision }`; notes are not affected |
+| GET | `/exports/markdown` | Managed Markdown export status; see [Managed Markdown Export](#managed-markdown-export) |
+| POST | `/exports/markdown` | `{ dryRun: true }` to preview, or `{ confirm: true, overwrite?: [documentId] }` to write |
 | GET | `/recordings/:id/transcript-versions` | Saved transcript versions, newest first, without text; `current` flag and citing-note count |
 | GET | `/transcript-versions/:id` | One transcript version including `fullText` |
 | GET | `/transcript-versions/:id/backlinks` | `{ version, documents }`: active notes citing exactly this version |
@@ -94,6 +100,48 @@ A note written from a transcript records the exact transcript version it read (a
 | `none` | The note was not written from a transcript |
 
 The response also carries `recordingId`, `recordingFilename`, `recordingAvailable` (false when the recording is in Trash or gone), `versionId`, `versionOrigin`, `versionCreatedAt`, and `currentVersionId`. Notes keep citing their version after a newer one is promoted; they are never rewritten. Backlinks exclude notes in Trash, and a restored note reappears.
+
+## Saved Views
+
+A saved view stores a named set of `GET /documents` filters: `folderId`, `view`, `q`, `sort`, and `tag`. Pagination is never saved, and the notes are listed live each time, so a view always reflects the current vault. Names are 1-80 characters and unique case-insensitively; up to 100 views. Renames and filter changes use the same revision rule as notes (`409` on a stale `revision`). A view that names a folder or tag that no longer exists simply lists nothing.
+
+```json
+{ "id": "…", "name": "Client work", "filters": { "view": "all", "q": "", "sort": "updated", "tag": "acme" }, "revision": 1, "createdAt": "…", "updatedAt": "…" }
+```
+
+## Managed Markdown Export
+
+A one-way export of every active note into a folder the server owner chooses, such as an Obsidian vault. The folder is configured only on the server, with `OPENPLOD_EXPORT_DIR` (an absolute path to an existing folder); there is no API for choosing a path. Without it, `GET /exports/markdown` reports `configured: false` and a run returns `503`.
+
+Each note becomes `<folder path>/<title>.md`, following the note's folder tree, with names made portable (no path separators, reserved or control characters). The file starts with YAML front matter: `openplod_id`, `title`, `revision`, `updated`, `tags`, and when present `source_recording`, `source_version`, `source_origin`, and `properties`. The body is the saved Markdown, unchanged.
+
+`.openplod-export.json` in the folder records, per note, the path and SHA-256 of what OpenPlod last wrote. Each run compares the file on disk against it:
+
+| `action` | Meaning |
+| --- | --- |
+| `created` | New note, written to a free path. A file OpenPlod does not own is never replaced; the note gets `Title (2).md` instead |
+| `updated` | The file still matched the manifest and was replaced with the new text |
+| `moved` | The note was renamed or moved; the new file was written and the old one removed, because it still matched the manifest |
+| `unchanged` | Nothing to do. Only counted, not listed |
+| `conflict` | The file was edited (`modified_externally`), deleted (`deleted_externally`), or replaced by a folder or symlink (`not_a_file`) outside OpenPlod. It is left alone |
+| `orphaned` | The note is in Trash or purged. Its file and manifest entry are kept, never deleted |
+
+A conflict is only resolved by naming that note in `overwrite` on a confirmed run, which replaces or recreates its file; symlinks are never followed or replaced. Run `{ "dryRun": true }` first: it reports exactly the same actions without writing anything. A real run requires `confirm: true`. Writes go through a temporary file and an atomic rename, and only one export runs at a time (`409 export_running`). An invalid manifest stops the run with `409 manifest_invalid` before anything is written; move it aside to start over. If a run fails midway, the manifest still records the files it wrote, so the next run does not treat them as foreign.
+
+Response: `{ root, dryRun, exportedAt, counts: { created, updated, moved, unchanged, conflict, orphaned }, items: [{ documentId, title, path, action, reason? }] }`. Attachments are not exported; notes reference their source recording and transcript version by id.
+
+## AI Chat Conversations
+
+Saved chat conversations live under `/api/ai`, outside the versioned `/api/v1` contract:
+
+| Method | Path | Request / behavior |
+| --- | --- | --- |
+| GET | `/conversations?archived=false` | Up to 30 conversations, newest activity first: `{ id, title, question, recordingIds, createdAt, turns, archived }`. `archived=true` lists the archive instead |
+| GET | `/conversations/:id` | Every saved answer, with sources and citations |
+| PATCH | `/conversations/:id` | `{ title?: string \| null, archived?: boolean }`; metadata only, saved answers are never changed. `title: null` returns to the first question |
+| GET | `/conversations/:id/export?format=md` | The complete conversation as Markdown, each cited quote resolved to its recording, timestamp, and transcript version; `format=json` returns every saved answer |
+
+`question` is the latest question asked. Asking a follow-up question in an archived conversation returns it to the main list. Conversations whose sources are in Trash are not listed or exported.
 
 ## Processing Jobs
 

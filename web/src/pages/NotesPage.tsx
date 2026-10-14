@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { ArrowLeft, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Download, FilePlus2, FileText, Folder, FolderPlus, History, Inbox, Loader2, MoreHorizontal, NotebookPen, Pencil, RefreshCw, RotateCcw, Save, Search, Send, Sparkles, Star, Trash2, Upload, X } from "@/components/icons"
+import { ArrowLeft, BookmarkPlus, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Download, FilePlus2, FileText, Folder, FolderOpen, FolderPlus, History, Inbox, Loader2, MoreHorizontal, NotebookPen, Pencil, RefreshCw, RotateCcw, Save, Search, Send, SlidersHorizontal, Sparkles, Star, Trash2, Upload, X } from "@/components/icons"
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/icon-button'
 import { DocumentCanvas } from '@/components/DocumentCanvas'
 import { FolderSelect, NoteDialog, SendNoteDialog } from '@/components/NoteDialogs'
 import { NoteMetadata } from '@/components/NoteMetadata'
-import { notesApi, folderPaths, type NoteFolder, type NoteDocument, type NotePage, type NoteVersion } from '@/lib/notes-api'
+import { MarkdownExportDialog } from '@/components/MarkdownExportDialog'
+import { notesApi, folderPaths, type NoteFolder, type NoteDocument, type NotePage, type NoteVersion, type SavedView, type SavedViewFilters } from '@/lib/notes-api'
 import { exportDocument, safeDocumentName } from '@/lib/document-export'
 import './notes.css'
 
@@ -26,6 +27,11 @@ export function NotesPage() {
   const [sort, setSort] = useState('updated')
   const [tag, setTag] = useState('')
   const [tags, setTags] = useState<{ tag: string; count: number }[]>([])
+  const [savedViews, setSavedViews] = useState<SavedView[]>([])
+  // The applied saved view; its stored filters drive the list until any filter is changed by hand.
+  const [activeView, setActiveView] = useState<SavedView | null>(null)
+  const [viewDialog, setViewDialog] = useState<'new' | SavedView | null>(null)
+  const [exportOpen, setExportOpen] = useState(false)
   const [offset, setOffset] = useState(0)
   const [page, setPage] = useState<NotePage>(emptyPage)
   const [document, setDocument] = useState<NoteDocument | null>(null)
@@ -47,7 +53,12 @@ export function NotesPage() {
   const dirty = !!document && (title !== document.title || content !== document.content || folderDraft !== (document.folderId || ''))
   const selectedFolder = folders.find(folder => folder.id === view)
   const targetFolder = selectedFolder?.id || null
-  const viewName = selectedFolder?.name || ({ all: 'All notes', inbox: 'Inbox', starred: 'Starred', trash: 'Trash' }[view] ?? 'Notes')
+  const viewName = activeView?.name || selectedFolder?.name || ({ all: 'All notes', inbox: 'Inbox', starred: 'Starred', trash: 'Trash' }[view] ?? 'Notes')
+  const currentFilters = (): Partial<SavedViewFilters> => ({
+    q: query.trim(), sort: sort as SavedViewFilters['sort'], view: view === 'starred' || view === 'trash' ? view : 'all',
+    ...(view !== 'all' && view !== 'starred' && view !== 'trash' ? { folderId: view } : {}), ...(tag ? { tag } : {}),
+  })
+  const filtered = view !== 'all' || !!query.trim() || !!tag || sort !== 'updated'
 
   const applyDocument = useCallback((document: NoteDocument) => {
     clearDraft(document.id)
@@ -57,6 +68,7 @@ export function NotesPage() {
     const controller = new AbortController()
     notesApi.folders(controller.signal).then(setFolders).catch(error => { if (!controller.signal.aborted) setError(errorMessage(error)) })
     notesApi.tags(controller.signal).then(setTags).catch(() => { /* The tag filter is optional; the list still loads. */ })
+    notesApi.views(controller.signal).then(setSavedViews).catch(() => { /* Saved views are optional; the list still loads. */ })
     return () => controller.abort()
   }, [refresh])
   useEffect(() => {
@@ -66,12 +78,14 @@ export function NotesPage() {
       const request: Record<string, string> = { q: query, sort, offset: String(offset), view: view === 'starred' || view === 'trash' ? view : 'all' }
       if (view !== 'all' && view !== 'starred' && view !== 'trash') request.folderId = view
       if (tag) request.tag = tag
+      // A saved view may combine filters the sidebar cannot show at once (a folder and Starred), so use it verbatim.
+      if (activeView) { for (const key of ['folderId', 'tag'] as const) delete request[key]; Object.assign(request, Object.fromEntries(Object.entries(activeView.filters).map(([key, value]) => [key, String(value)]))) }
       notesApi.list(request, controller.signal).then(result => { if (!controller.signal.aborted) setPage(result) })
         .catch(error => { if (!controller.signal.aborted) setError(errorMessage(error)) })
         .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     }, query ? 200 : 0)
     return () => { controller.abort(); window.clearTimeout(timer) }
-  }, [view, query, sort, offset, tag, refresh])
+  }, [view, query, sort, offset, tag, refresh, activeView])
   useEffect(() => {
     if (!selectedId) { setDocument(null); setDocumentLoading(false); return }
     const controller = new AbortController()
@@ -125,7 +139,13 @@ export function NotesPage() {
   }
   const selectView = (next: string) => {
     if (busy || !canLeave()) return
-    setView(next); setOffset(0); setParams({}); setError(''); setNotice(''); setSidebarOpen(false)
+    setView(next); setOffset(0); setParams({}); setError(''); setNotice(''); setSidebarOpen(false); setActiveView(null)
+  }
+  const applySavedView = (saved: SavedView) => {
+    if (busy || !canLeave()) return
+    const { filters } = saved
+    setView(filters.folderId || (filters.view !== 'all' ? filters.view : 'all')); setQuery(filters.q); setSort(filters.sort); setTag(filters.tag || '')
+    setOffset(0); setParams({}); setError(''); setNotice(''); setSidebarOpen(false); setActiveView(saved)
   }
   const mutate = async (operation: () => Promise<void>) => {
     if (busy) return
@@ -180,25 +200,32 @@ export function NotesPage() {
       <header className="notes-heading"><div><h1>Documents</h1></div><div>
         <IconButton asChild label="Open transcripts"><Link to="/transcripts"><FileText /></Link></IconButton>
         <IconButton label="Import Markdown" disabled={busy} onClick={() => importRef.current?.click()}><Upload /></IconButton>
+        <IconButton label="Export to folder" disabled={busy} onClick={() => setExportOpen(true)}><FolderOpen /></IconButton>
         <Button size="sm" disabled={busy} onClick={createNote}><FilePlus2 />New note</Button>
       </div></header>
       <aside className={`notes-folders ${sidebarOpen ? 'is-open' : ''}`} aria-label="Note folders">
         <div className="notes-folders-title"><span>Workspace</span><Button size="icon" variant="ghost" title="New folder" aria-label="New folder" disabled={busy} onClick={() => setFolderDialog('new')}><FolderPlus /></Button></div>
         {([{ id: 'all', name: 'All notes', icon: NotebookPen }, { id: 'inbox', name: 'Inbox', icon: Inbox }, { id: 'starred', name: 'Starred', icon: Star }] as const).map(({ id, name, icon: Icon }) =>
-          <button type="button" key={id} className={view === id ? 'selected' : ''} aria-current={view === id ? 'page' : undefined} onClick={() => selectView(id)}><Icon /><span>{name}</span></button>)}
-        <div className="notes-folder-tree">{folderPaths(folders).map(({ folder, depth, path }) => <button type="button" key={folder.id} title={path} style={{ paddingLeft: `${10 + Math.min(depth, 6) * 12}px` }} className={view === folder.id ? 'selected' : ''} aria-current={view === folder.id ? 'page' : undefined} onClick={() => selectView(folder.id)}><Folder /><span>{folder.name}</span><small>{folder.documentCount}</small></button>)}</div>
-        <button type="button" className={view === 'trash' ? 'selected' : ''} aria-current={view === 'trash' ? 'page' : undefined} onClick={() => selectView('trash')}><Trash2 /><span>Trash</span></button>
+          <button type="button" key={id} className={!activeView && view === id ? 'selected' : ''} aria-current={!activeView && view === id ? 'page' : undefined} onClick={() => selectView(id)}><Icon /><span>{name}</span></button>)}
+        {savedViews.length > 0 && <div className="notes-saved-views" role="group" aria-label="Saved views">{savedViews.map(saved => <button type="button" key={saved.id} title={saved.name} className={activeView?.id === saved.id ? 'selected' : ''} aria-current={activeView?.id === saved.id ? 'page' : undefined} onClick={() => applySavedView(saved)}><SlidersHorizontal /><span>{saved.name}</span></button>)}</div>}
+        <div className="notes-folder-tree">{folderPaths(folders).map(({ folder, depth, path }) => <button type="button" key={folder.id} title={path} style={{ paddingLeft: `${10 + Math.min(depth, 6) * 12}px` }} className={!activeView && view === folder.id ? 'selected' : ''} aria-current={!activeView && view === folder.id ? 'page' : undefined} onClick={() => selectView(folder.id)}><Folder /><span>{folder.name}</span><small>{folder.documentCount}</small></button>)}</div>
+        <button type="button" className={!activeView && view === 'trash' ? 'selected' : ''} aria-current={!activeView && view === 'trash' ? 'page' : undefined} onClick={() => selectView('trash')}><Trash2 /><span>Trash</span></button>
       </aside>
       <section className="notes-list" aria-label="Documents">
         <header><button className="notes-folder-toggle" type="button" aria-label="Toggle folders" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(value => !value)}><Folder /></button><h2>{viewName}</h2><span>{page.total}</span>
-          {selectedFolder ? <DropdownMenu.Root><DropdownMenu.Trigger asChild><Button size="icon" variant="ghost" aria-label="Folder actions" title="Folder actions"><MoreHorizontal /></Button></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="action-menu" align="end">
+          {activeView ? <DropdownMenu.Root><DropdownMenu.Trigger asChild><Button size="icon" variant="ghost" aria-label="Saved view actions" title="Saved view actions"><MoreHorizontal /></Button></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="action-menu" align="end">
+            <DropdownMenu.Item onSelect={() => setViewDialog(activeView)}><Pencil />Rename view</DropdownMenu.Item>
+            <DropdownMenu.Item onSelect={() => { if (window.confirm(`Delete the saved view "${activeView.name}"? Notes are not affected.`)) void mutate(async () => { await notesApi.deleteView(activeView.id, activeView.revision); setActiveView(null) }) }}><Trash2 />Delete view</DropdownMenu.Item>
+          </DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>
+          : filtered && <Button size="icon" variant="ghost" title="Save as view" aria-label="Save as view" disabled={busy} onClick={() => setViewDialog('new')}><BookmarkPlus /></Button>}
+          {activeView ? null : selectedFolder ? <DropdownMenu.Root><DropdownMenu.Trigger asChild><Button size="icon" variant="ghost" aria-label="Folder actions" title="Folder actions"><MoreHorizontal /></Button></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="action-menu" align="end">
             <DropdownMenu.Item onSelect={() => setFolderDialog(selectedFolder)}><Pencil />Edit folder</DropdownMenu.Item>
             <DropdownMenu.Item onSelect={() => { if (window.confirm('Delete this empty folder? Documents and subfolders must be moved first.')) void mutate(async () => { await notesApi.deleteFolder(selectedFolder.id, selectedFolder.revision); selectView('all') }) }}><Trash2 />Delete empty folder</DropdownMenu.Item>
           </DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root> : <Button size="icon" variant="ghost" title="Refresh notes" aria-label="Refresh notes" onClick={() => setRefresh(value => value + 1)}><RefreshCw /></Button>}
         </header>
-        <label className="notes-search"><Search /><input aria-label="Search notes" value={query} placeholder="Search notes" maxLength={200} onChange={event => { setQuery(event.target.value); setOffset(0) }} /></label>
-        <select className="notes-sort" aria-label="Sort notes" value={sort} onChange={event => { setSort(event.target.value); setOffset(0) }}><option value="updated">Last edited</option><option value="title">Title A to Z</option></select>
-        {tags.length > 0 && <div className="notes-tag-filter" role="group" aria-label="Filter by tag">{tags.map(item => <button type="button" key={item.tag} aria-pressed={tag.toLocaleLowerCase() === item.tag.toLocaleLowerCase()} onClick={() => { setTag(current => current.toLocaleLowerCase() === item.tag.toLocaleLowerCase() ? '' : item.tag); setOffset(0) }}>{item.tag}<small>{item.count}</small></button>)}</div>}
+        <label className="notes-search"><Search /><input aria-label="Search notes" value={query} placeholder="Search notes" maxLength={200} onChange={event => { setQuery(event.target.value); setOffset(0); setActiveView(null) }} /></label>
+        <select className="notes-sort" aria-label="Sort notes" value={sort} onChange={event => { setSort(event.target.value); setOffset(0); setActiveView(null) }}><option value="updated">Last edited</option><option value="title">Title A to Z</option></select>
+        {tags.length > 0 && <div className="notes-tag-filter" role="group" aria-label="Filter by tag">{tags.map(item => <button type="button" key={item.tag} aria-pressed={tag.toLocaleLowerCase() === item.tag.toLocaleLowerCase()} onClick={() => { setTag(current => current.toLocaleLowerCase() === item.tag.toLocaleLowerCase() ? '' : item.tag); setOffset(0); setActiveView(null) }}>{item.tag}<small>{item.count}</small></button>)}</div>}
         <div className="notes-list-items" aria-busy={loading}>
           {loading ? <div className="notes-empty" role="status"><Loader2 className="animate-spin" />Loading notes</div> : page.documents.map(note => <button type="button" key={note.id} className={`notes-list-item ${selectedId === note.id ? 'selected' : ''}`} onClick={() => selectDocument(note.id)}>
             <FileText className="notes-list-file" /><div className="notes-list-copy"><div><strong>{note.title}</strong>{note.starred && <Star className="note-star" />}</div><p>{note.excerpt || 'Empty note'}</p>{note.tags.length > 0 && <span className="notes-list-tags">{note.tags.slice(0, 3).map(value => <i key={value}>{value}</i>)}</span>}<small>{shortDate(note.updatedAt)}<span>{note.sourceRecordingId ? 'Transcript' : 'Markdown'}</span></small></div>
@@ -243,6 +270,15 @@ export function NotesPage() {
         </> : <div className="notes-empty notes-editor-empty"><NotebookPen /><h2>Your Markdown workspace</h2><Button variant="outline" onClick={createNote}><FilePlus2 />New note</Button></div>}
       </section>
     </div>
+    {viewDialog && <ViewForm view={viewDialog === 'new' ? null : viewDialog} onClose={() => setViewDialog(null)} onSaved={async saved => {
+      setViewDialog(null)
+      if (viewDialog === 'new') {
+        // Re-applying the view switches to its stored filters, which match what is on screen.
+        setSavedViews(rows => [...rows, saved]); setActiveView(saved)
+      } else setActiveView(current => current?.id === saved.id ? saved : current)
+      setRefresh(value => value + 1)
+    }} filters={currentFilters()} />}
+    {exportOpen && <MarkdownExportDialog onClose={() => setExportOpen(false)} />}
     {folderDialog && <FolderForm folder={folderDialog === 'new' ? null : folderDialog} folders={folders} parentId={targetFolder} onClose={() => setFolderDialog(null)} onSaved={() => { setFolderDialog(null); setRefresh(value => value + 1) }} />}
   </div>
 }
@@ -261,6 +297,22 @@ function FolderForm({ folder, folders, parentId, onClose, onSaved }: {folder: No
     }}><label>Name<input autoFocus aria-label="Folder name" value={name} onChange={event => setName(event.target.value)} required maxLength={180} /></label>
       <label>Parent folder<FolderSelect folders={folders} value={parent} onChange={setParent} rootLabel="Workspace" exclude={folder?.id} disabled={busy} /></label>
       {error && <p role="alert" className="note-error">{error}</p>}<footer><Button type="button" variant="ghost" disabled={busy} onClick={onClose}><X />Cancel</Button><Button disabled={busy || !name.trim()}>{busy ? <Loader2 className="animate-spin" /> : <FolderPlus />}{folder ? 'Save folder' : 'Create folder'}</Button></footer>
+    </form>
+  </NoteDialog>
+}
+
+function ViewForm({ view, filters, onClose, onSaved }: {view: SavedView | null; filters: Partial<SavedViewFilters>; onClose: () => void; onSaved: (view: SavedView) => void}) {
+  const [name, setName] = useState(view?.name || '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  return <NoteDialog title={view ? 'Rename view' : 'Save view'} description={view ? view.name : 'Keep the current folder, search, tag, and sort'} onClose={onClose} busy={busy}>
+    <form onSubmit={async event => {
+      event.preventDefault(); setBusy(true); setError('')
+      try { onSaved(view ? await notesApi.updateView(view.id, { name, revision: view.revision }) : await notesApi.createView(name, filters)) }
+      catch (error) { setError(errorMessage(error)) }
+      finally { setBusy(false) }
+    }}><label>Name<input autoFocus aria-label="View name" value={name} onChange={event => setName(event.target.value)} required maxLength={80} /></label>
+      {error && <p role="alert" className="note-error">{error}</p>}<footer><Button type="button" variant="ghost" disabled={busy} onClick={onClose}><X />Cancel</Button><Button disabled={busy || !name.trim()}>{busy ? <Loader2 className="animate-spin" /> : <BookmarkPlus />}{view ? 'Rename view' : 'Save view'}</Button></footer>
     </form>
   </NoteDialog>
 }

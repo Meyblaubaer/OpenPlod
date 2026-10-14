@@ -39,6 +39,7 @@ export const Wand2 = glyph('StructureWithAi', <><path {...tone} d="m4 17 11-11 3
 export const Workflow = glyph('Connections', <><rect {...tone} x="2" y="3" width="7" height="6" rx="1.5" /><rect {...tone} x="15" y="15" width="7" height="6" rx="1.5" /><rect x="2" y="3" width="7" height="6" rx="1.5" /><rect x="15" y="15" width="7" height="6" rx="1.5" /><path d="M9 6h9v9M5.5 9v9H15" /><circle cx="18" cy="6" r="2" /></>)
 export const HardDrive = glyph('Vault', <><path {...tone} d="M6 3h12l3 11v6H3v-6z" /><path d="M6 3h12l3 11v6H3v-6zM3 14h18m-14 3h.01m3 0h.01M8 7h8" /></>)
 export const Inbox = glyph('Inbox', <><path {...tone} d="M6 4h12l4 11v5H2v-5z" /><path d="M6 4h12l4 11v5H2v-5zM2 14h6l2 3h4l2-3h6" /></>)
+export const Archive = glyph('Archive', <><path {...tone} d="M4 8h16v12H4z" /><path d="M3 4h18v4H3zM4 8v12h16V8M10 12h4" /></>)
 export const Trash2 = glyph('Trash', <><path {...tone} d="M6 7h12l-1 14H7z" /><path d="M4 7h16M9 7V3h6v4M6 7l1 14h10l1-14M10 11v6m4-6v6" /></>)
 export const Star = glyph('Star', <><path {...tone} d="m12 2 3 6.5 7 .9-5.2 5 1.3 7.1-6.1-3.4-6.1 3.4 1.3-7.1-5.2-5 7-.9z" /><path d="m12 2 3 6.5 7 .9-5.2 5 1.3 7.1-6.1-3.4-6.1 3.4 1.3-7.1-5.2-5 7-.9z" /></>)
 export const Tag = glyph('Tag', <><path {...tone} d="M3 3h9l10 10-9 9L3 12z" /><path d="M3 3h9l10 10-9 9L3 12z" /><circle cx="7.5" cy="7.5" r="1.2" /></>)

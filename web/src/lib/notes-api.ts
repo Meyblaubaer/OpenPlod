@@ -1,12 +1,13 @@
 import { apiUrl, authenticatedHeaders } from './runtime'
 import type { DocumentGeneration } from '../../../src/organizer/types'
 export type { DocumentGeneration } from '../../../src/organizer/types'
-import type { NoteFolder, NoteDocument, NotePage, NoteVersion, NoteDestination, NoteDelivery, NoteProperties, DocumentSource, TranscriptVersionBacklinks } from '../../../src/organizer/types'
+import type { NoteFolder, NoteDocument, NotePage, NoteVersion, NoteDestination, NoteDelivery, NoteProperties, DocumentSource, TranscriptVersionBacklinks, SavedView, SavedViewFilters, ExportResult, ExportStatus } from '../../../src/organizer/types'
 
 /** Document templates offered by the backend (roadmap TS-07). */
 export const DOCUMENT_STYLES = ['notes', 'meeting', 'interview', 'lecture', 'brief', 'prd', 'email'] as const
 export type DocumentStyle = (typeof DOCUMENT_STYLES)[number]
-export type { NoteFolder, NoteDocument, NoteSummary, NotePage, NoteVersion, NoteDestination, NoteDelivery, NoteProperties, DocumentSource, TranscriptVersionBacklinks } from '../../../src/organizer/types'
+export type { NoteFolder, NoteDocument, NoteSummary, NotePage, NoteVersion, NoteDestination, NoteDelivery, NoteProperties, DocumentSource, TranscriptVersionBacklinks, SavedView, SavedViewFilters } from '../../../src/organizer/types'
+export type { ExportResult, ExportStatus, ExportItem } from '../../../src/organizer/types'
 
 async function request<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(apiUrl(`/v1${path}`), { method,
@@ -29,6 +30,12 @@ export const notesApi = {
   create: (data: {title: string; content: string; folderId: string | null; idempotencyKey: string}) => request<NoteDocument>('/documents', 'POST', data),
   update: (id: string, data: {title?: string; content?: string; folderId?: string | null; starred?: boolean; tags?: string[]; properties?: NoteProperties; revision: number}) => request<NoteDocument>(`/documents/${id}`, 'PATCH', data),
   tags: (signal?: AbortSignal) => request<{ tag: string; count: number }[]>('/tags', 'GET', undefined, signal),
+  views: (signal?: AbortSignal) => request<SavedView[]>('/views', 'GET', undefined, signal),
+  createView: (name: string, filters: Partial<SavedViewFilters>) => request<SavedView>('/views', 'POST', { name, filters }),
+  updateView: (id: string, data: { name?: string; filters?: Partial<SavedViewFilters>; revision: number }) => request<SavedView>(`/views/${id}`, 'PATCH', data),
+  deleteView: (id: string, revision: number) => request<null>(`/views/${id}`, 'DELETE', { revision }),
+  exportStatus: (signal?: AbortSignal) => request<ExportStatus>('/exports/markdown', 'GET', undefined, signal),
+  exportMarkdown: (data: { dryRun: boolean; overwrite?: string[] }) => request<ExportResult>('/exports/markdown', 'POST', data.dryRun ? data : { ...data, confirm: true }),
   source: (id: string, signal?: AbortSignal) => request<DocumentSource>(`/documents/${id}/source`, 'GET', undefined, signal),
   backlinks: (versionId: string, signal?: AbortSignal) => request<TranscriptVersionBacklinks>(`/transcript-versions/${versionId}/backlinks`, 'GET', undefined, signal),
   trash: (id: string, revision: number) => request<NoteDocument>(`/documents/${id}`, 'DELETE', { revision }),

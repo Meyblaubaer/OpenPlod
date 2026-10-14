@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Implemented 2026-10-12; milestone exit gate not run |
+| Status | Implemented 2026-10-12; milestone exit gate not run. Followed by [Sprint 2](sprint-0.7.0-2.md) |
 | Window | 2026-09-22 to 2026-10-05 (two weeks) |
 | Milestone | 0.7.0 - Knowledge, Chat, and Automation |
 | Base | 0.6.0 Transcript Studio, plus the batched-lookup maintenance pass (`780d5a7`) |

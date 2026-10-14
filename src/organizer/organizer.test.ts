@@ -307,4 +307,23 @@ describe('knowledge links (0.7.0 KB-01)', () => {
     for (let index = 0; index < 40; index++) addVersion(recordingId, `v${index}`, `2026-10-04T10:${String(index).padStart(2, '0')}:00Z`);
     expect(statements()).toBe(small);
   });
+  test('saved views store filters, enforce unique names and revisions, and list live (KB-01c)', async () => {
+    const projects = folder();
+    note({ folderId: projects.id, tags: ['Client'] }); note({ tags: ['client'] }); note();
+    const view = store.createView({ name: 'Client work', filters: { tag: 'client', folderId: projects.id } });
+    expect(view).toMatchObject({ revision: 1, filters: { tag: 'client', folderId: projects.id, view: 'all', q: '', sort: 'updated' } });
+    expect(store.list(view.filters).total).toBe(1);
+    expect(() => store.createView({ name: 'client WORK', filters: {} })).toThrow('already exists');
+    expect(() => store.createView({ name: 'Paged', filters: { offset: 30 } })).toThrow();
+    const renamed = store.updateView(view.id, { name: 'All client notes', filters: { tag: 'Client' }, revision: 1 });
+    expect(store.list(renamed.filters).total).toBe(2);
+    expect(() => store.updateView(view.id, { name: 'Stale', revision: 1 })).toThrow('changed elsewhere');
+    expect(store.views().map(row => row.name)).toEqual(['All client notes']);
+    expect((await apiRequest('/views', { name: 'Starred', filters: { view: 'starred' } })).status).toBe(201);
+    expect(((await (await apiRequest('/views', undefined, 'GET')).json()) as { data: unknown[] }).data).toHaveLength(2);
+    expect((await apiRequest(`/views/${view.id}`, { revision: 1 }, 'DELETE')).status).toBe(409);
+    expect((await apiRequest(`/views/${view.id}`, { revision: 2 }, 'DELETE')).status).toBe(200);
+    expect((await apiRequest(`/views/${view.id}`, { revision: 2 }, 'DELETE')).status).toBe(404);
+    initializeOrganizer(database); expect(store.views()).toHaveLength(1);
+  });
 });

@@ -9,8 +9,17 @@ export function createRecordingAiApi(ai: RecordingAi) {
   const app = new Hono();
   app.use('*', bodyLimit({ maxSize: 32768 }));
   app.onError((e, c) => c.json({ success: false, error: e instanceof OrganizerError ? e.message : 'Invalid AI request.' }, e instanceof OrganizerError ? e.status : 400));
-  app.get('/conversations', c => c.json({ success: true, data: ai.conversations() }));
+  app.get('/conversations', c => c.json({ success: true, data: ai.conversations(c.req.query()) }));
   app.get('/conversations/:id', c => c.json({ success: true, data: ai.history(c.req.param('id')) }));
+  app.patch('/conversations/:id', async c => c.json({ success: true, data: ai.updateConversation(c.req.param('id'), await c.req.json()) }));
+  app.get('/conversations/:id/export', c => {
+    const format = z.enum(['md', 'json']).parse(c.req.query('format') || 'md');
+    const { title, body } = ai.exportConversation(c.req.param('id'), format);
+    c.header('Cache-Control', 'no-store');
+    c.header('Content-Disposition', `attachment; filename="conversation.${format}"; filename*=UTF-8''${encodeURIComponent(title.slice(0, 80)).replace(/['()*]/g, value => '%' + value.charCodeAt(0).toString(16))}.${format}`);
+    c.header('Content-Type', format === 'md' ? 'text/markdown; charset=utf-8' : 'application/json; charset=utf-8');
+    return c.body(body);
+  });
   app.post('/ask', async c => {
     const input = questionSchema.parse(await c.req.json());
     return streamSSE(c, async stream => {

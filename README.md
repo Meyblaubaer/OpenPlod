@@ -114,7 +114,7 @@ The [1.0.0 roadmap](ROADMAP.md) expands OpenPlod into a multi-provider transcrip
 
 - **0.5:** OpenAI and AssemblyAI speech-to-text, stronger Mistral/Deepgram/local Whisper controls, and separate cloud/local AI choices for transcript analysis.
 - **0.6:** Transcript Studio with reviewed AI cleanup, translation, version comparison, chapters, reusable document templates, and subtitle exports.
-- **0.7:** Linked Markdown knowledge, managed Obsidian export, richer source-linked chat, and expanded API/MCP automation. [0.7.0 Sprint 1](docs/sprint-0.7.0.md) is implemented on `main`: document tags, properties, and transcript-version backlinks, a versioned job API, and read-only MCP job/source tools.
+- **0.7:** Linked Markdown knowledge, managed Obsidian export, richer source-linked chat, and expanded API/MCP automation. [0.7.0 Sprint 1](docs/sprint-0.7.0.md) and [Sprint 2](docs/sprint-0.7.0-2.md) are implemented on `main`: document tags, properties, saved views, and transcript-version backlinks; a versioned job API; one-way managed Markdown export to a folder such as an Obsidian vault; chat conversation rename, archive, and full export; and read-only MCP tools for all of these.
 - **0.8:** Resumable Android uploads, offline synchronization, pairing management, and validated direct-device recovery.
 - **0.9 -> 1.0:** Fresh-owner Plaud onboarding, backup/restore, privacy hardening, performance validation, and signed releases.
 
@@ -310,7 +310,7 @@ The debug APK is produced under `src-tauri/gen/android/app/build/outputs/apk/uni
 
 ### Recording AI and Playback
 
-The **AI** tab accepts up to 12 selected recordings with saved transcripts. After explicit consent, the selected chat provider answers using only that selected context. Answers are saved with provider/model provenance, activity stages, exact-quote source references, transcript version IDs, and timestamp links where available. Open previous conversations or export answers as Markdown. Oversized context, missing credentials, invalid citations, and deleted sources produce errors instead of placeholder answers.
+The **AI** tab accepts up to 12 selected recordings with saved transcripts. After explicit consent, the selected chat provider answers using only that selected context. Answers are saved with provider/model provenance, activity stages, exact-quote source references, transcript version IDs, and timestamp links where available. Open, rename, or archive previous conversations, and export a single answer or the whole conversation (Markdown or JSON, with each quote resolved to its recording, timestamp, and transcript version). Oversized context, missing credentials, invalid citations, and deleted sources produce errors instead of placeholder answers.
 
 Recording detail includes 0.75x to 2x playback, timestamp bookmarks, and segment corrections with speaker-label editing. Corrections create a new user-edited transcript version and preserve supplied timing; generated versions remain separate. Untimed text is never presented with fabricated timestamps.
 
@@ -320,10 +320,11 @@ OpenPlod is both a local application and an automation endpoint. The backend rem
 
 | Interface | Use it for | Default boundary |
 | --- | --- | --- |
-| [REST API](docs/api.md) | Folder/document CRUD, tags and properties, revisions, transcript versions and backlinks, processing-job status, generation, exports, and configured delivery | Authenticated `/api/v1` on the desktop service |
+| [REST API](docs/api.md) | Folder/document CRUD, tags, properties, and saved views, revisions, transcript versions and backlinks, processing-job status, generation, exports, and configured delivery | Authenticated `/api/v1` on the desktop service |
 | [MCP server](docs/mcp.md) | Let an assistant browse notes, folders, tags, transcripts, version history, note sources, and job status | Local stdio, read-only by default |
 | MCP write opt-in | Create/edit/move notes and folders; confirmed Trash and restore | `OPENPLOD_MCP_WRITE=1`; no purge, device reset, or external delivery tools |
 | [Webhook destinations](docs/api.md#send-to-a-destination) | Send saved Markdown into your own automation receiver | Owner-configured HTTPS destinations and explicit confirmation |
+| [Markdown folder export](docs/api.md#managed-markdown-export) | Keep an Obsidian vault or any folder in step with your notes, one way | `OPENPLOD_EXPORT_DIR` set by the owner; preview first; files edited elsewhere are never overwritten silently |
 
 For an MCP client installed on the same Mac, configure:
 

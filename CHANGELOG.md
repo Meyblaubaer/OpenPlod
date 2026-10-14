@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased - 0.7.0 Sprint 2
+
+Keeping knowledge: saved views, a managed folder export, and conversation management
+([sprint plan and outcome](docs/sprint-0.7.0-2.md)).
+
+### Added
+
+- **KB-01** saved document views. Save any combination of folder, Starred or Trash, search, tag,
+  and sort under a name; views list matching notes live and appear in the Documents sidebar.
+  New endpoints: `/api/v1/views` and `/api/v1/views/:id`.
+- **KB-02** managed one-way Markdown export to the folder named by `OPENPLOD_EXPORT_DIR`, such as
+  an Obsidian vault. Notes keep their folder tree and gain YAML front matter with their id, tags,
+  properties, and source transcript version. A manifest records what OpenPlod wrote; files edited,
+  deleted, or created elsewhere are reported as conflicts and never overwritten unless you tick
+  them. Every export can be previewed first. New endpoint: `/api/v1/exports/markdown`, and an
+  "Export to folder" button in Documents.
+- **KB-03** chat conversations can be renamed, archived and restored, and exported whole as
+  Markdown or JSON, with each quote resolved to its recording, timestamp, and transcript version.
+  A follow-up question returns an archived conversation to the main list.
+- **KB-07** read-only MCP tools `list_saved_views` and `get_markdown_export_status`.
+
 ## Unreleased - 0.7.0 Sprint 1
 
 Knowledge links and a shared job API ([sprint plan and outcome](docs/sprint-0.7.0.md)), plus fixes

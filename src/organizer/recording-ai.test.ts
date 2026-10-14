@@ -70,3 +70,34 @@ test('provider failure exposes no response body and SSE correlates progress/resu
   const response = await app.request('/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) });
   const stream = await response.text(); expect(stream).toContain('event: progress'); expect(stream).toContain('event: result'); expect(stream).toContain(request.id); expect(stream).not.toContain('test-only-key');
 });
+test('conversations can be renamed, archived, restored by a follow-up, and exported with resolved sources (KB-03a)', async () => {
+  const ai = create(async () => reply()), request = input();
+  await ai.ask(request, async () => {});
+  expect(ai.conversations()).toMatchObject([{ id: request.conversationId, title: null, question: 'What was decided?', turns: 1, archived: false }]);
+  expect(ai.updateConversation(request.conversationId, { title: 'Audio retention' })).toMatchObject({ title: 'Audio retention', archived: false });
+  ai.updateConversation(request.conversationId, { archived: true });
+  expect(ai.conversations()).toEqual([]);
+  expect(ai.conversations({ archived: 'true' })).toMatchObject([{ title: 'Audio retention', archived: true }]);
+  expect(() => ai.updateConversation(crypto.randomUUID(), { title: 'x' })).toThrow('not found');
+  expect(() => ai.updateConversation(request.conversationId, {})).toThrow();
+
+  const markdown = ai.exportConversation(request.conversationId, 'md');
+  expect(markdown.title).toBe('Audio retention');
+  expect(markdown.body).toContain('# Audio retention\n\n## What was decided?\n\nKeep the original audio. [S1]');
+  expect(markdown.body).toContain(`- [S1] Test recording (0:02), recording ${recordingId}`);
+  const json = JSON.parse(ai.exportConversation(request.conversationId, 'json').body);
+  expect(json).toMatchObject({ id: request.conversationId, title: 'Audio retention', archived: true, turns: [{ question: 'What was decided?' }] });
+
+  await ai.ask({ ...request, id: crypto.randomUUID(), question: 'And next?' }, async () => {});
+  expect(ai.conversations()).toMatchObject([{ id: request.conversationId, title: 'Audio retention', question: 'And next?', turns: 2, archived: false }]);
+  expect(ai.updateConversation(request.conversationId, { title: null }).title).toBeNull();
+
+  const api = createRecordingAiApi(ai);
+  const exported = await api.request(`/conversations/${request.conversationId}/export?format=md`);
+  expect(exported.headers.get('content-type')).toContain('text/markdown');
+  expect(await exported.text()).toContain('## And next?');
+  expect((await api.request(`/conversations/${crypto.randomUUID()}/export`)).status).toBe(404);
+  const patched = await api.request(`/conversations/${request.conversationId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ archived: true }) });
+  expect(((await patched.json()) as { data: { archived: boolean } }).data.archived).toBe(true);
+  expect(((await (await api.request('/conversations?archived=true')).json()) as { data: unknown[] }).data).toHaveLength(1);
+});

@@ -39,6 +39,10 @@ export function createMcpServer(client: VaultClient, allowWrites = false) {
     ({ offset, source }) => result(() => client.request(`/api/transcripts?offset=${offset}${source ? `&source=${source}` : ''}`)));
   server.registerTool('list_tags', { description: 'List document tags in use on active notes, with counts. Filter notes by one with list_documents { tag }.', inputSchema: {}, annotations: read },
     () => result(() => client.request('/api/v1/tags')));
+  server.registerTool('list_saved_views', { description: 'List saved document views. Each view is a stored set of list_documents filters (folderId, view, q, sort, tag); pass them to list_documents to read the matching notes.', inputSchema: {}, annotations: read },
+    () => result(() => client.request('/api/v1/views')));
+  server.registerTool('get_markdown_export_status', { description: 'Report whether managed Markdown export to a folder is configured, and when it last ran. Running an export is not available through MCP.', inputSchema: {}, annotations: read },
+    () => result(() => client.request('/api/v1/exports/markdown')));
   server.registerTool('get_document_source', { description: 'Resolve the exact transcript version a note was written from. status is current, stale (a newer version is current), unknown (the cited version cannot be found; no substitute text is returned), or none.', inputSchema: { id: identifier }, annotations: read },
     ({ id }) => result(() => client.request(`/api/v1/documents/${id}/source`)));
   server.registerTool('list_transcript_versions', { description: 'List saved transcript versions for a recording, newest first, with provider, current flag, and how many active notes cite each. Text is not included.', inputSchema: { recordingId: identifier }, annotations: read },

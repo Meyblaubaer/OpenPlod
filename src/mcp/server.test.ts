@@ -114,7 +114,7 @@ test('read-only MCP exposes source, version, and job tools without any write pat
   await server.connect(left); await client.connect(right);
   try {
     const tools = (await client.listTools()).tools;
-    for (const name of ['list_transcript_versions', 'get_transcript_version', 'list_jobs', 'get_job', 'get_document_source', 'list_transcript_backlinks', 'list_tags'])
+    for (const name of ['list_transcript_versions', 'get_transcript_version', 'list_jobs', 'get_job', 'get_document_source', 'list_transcript_backlinks', 'list_tags', 'list_saved_views', 'get_markdown_export_status'])
       expect(tools.map(tool => tool.name)).toContain(name);
     expect(tools.every(tool => tool.annotations?.readOnlyHint)).toBe(true);
     const text = async (name: string, args: Record<string, unknown>) => {
@@ -130,6 +130,9 @@ test('read-only MCP exposes source, version, and job tools without any write pat
     const missingJob = await text('get_job', { id: crypto.randomUUID() });
     expect(missingJob).toMatchObject({ isError: true, body: expect.stringContaining('Not found') });
     expect((await text('get_transcript_version', { versionId: crypto.randomUUID() })).isError).toBe(true);
+    store.createView({ name: 'Inbox review', filters: { folderId: 'inbox' } });
+    expect(JSON.parse((await text('list_saved_views', {})).body)).toMatchObject([{ name: 'Inbox review', filters: { folderId: 'inbox' } }]);
+    expect(JSON.parse((await text('get_markdown_export_status', {})).body)).toHaveProperty('configured');
     expect(methods.every(method => method === 'GET')).toBe(true);
     expect(providerCalls).toBe(0);
   } finally { await client.close(); await server.close(); }

@@ -5,7 +5,7 @@
 .notes-columns { display: grid; grid-template-columns: 180px 270px minmax(0, 1fr); grid-template-rows: 60px minmax(0, 1fr); flex: 1; min-height: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .notes-folders { grid-column: 1; grid-row: 2; padding: 12px 8px; min-width: 0; overflow-y: auto; }
 .notes-folders-title { display: flex; justify-content: space-between; align-items: center; padding: 0 4px 8px 8px; font-size: 12px; color: var(--muted-foreground); }
-.notes-folders > button, .notes-folder-tree button { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 41px; text-align: left; padding: 8px 10px; font-size: 13px; border: 1px solid transparent; border-radius: 5px; }
+.notes-folders > button, .notes-folder-tree button, .notes-saved-views button { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 41px; text-align: left; padding: 8px 10px; font-size: 13px; border: 1px solid transparent; border-radius: 5px; }
 .notes-folders button svg { width: 18px; height: 18px; flex-shrink: 0; color: var(--muted-foreground); stroke-width: 1.6; }
 .notes-folders button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .notes-folders button small { margin-left: auto; color: var(--muted-foreground); font-size: 11px; }
@@ -207,3 +207,5 @@
 .notes-backlinks { display: grid; gap: 2px; }
 .notes-backlinks button { color: var(--pine); text-align: left; }
 @media (max-width: 720px) { .notes-metadata { padding-inline: 12px; } }
+/* Saved views (KB-01c) sit between the fixed views and the folder tree. */
+.notes-saved-views { margin: 8px 0 0; padding-top: 8px; border-top: 1px solid var(--border); }

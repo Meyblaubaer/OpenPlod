@@ -26,3 +26,14 @@ export const noteListSchema = z.object({
 export const revisionSchema = z.object({ revision }).strict();
 export const purgeSchema = z.object({ revision, confirm: z.literal(true) }).strict();
 export const sendNoteSchema = z.object({ destinationId: z.string().regex(/^[a-z0-9-]{1,64}$/), revision, confirm: z.literal(true), idempotencyKey: identifier }).strict();
+/** A saved view stores list filters only; pagination is never saved. */
+export const savedViewFilters = noteListSchema.pick({ folderId: true, view: true, q: true, sort: true, tag: true }).strict();
+const viewName = z.string().trim().min(1).max(80).refine(value => !/[\x00-\x1f]/.test(value), 'Use a view name without control characters');
+export const createViewSchema = z.object({ name: viewName, filters: savedViewFilters }).strict();
+export const updateViewSchema = z.object({ name: viewName.optional(), filters: savedViewFilters.optional(), revision }).strict();
+export const markdownExportSchema = z.object({
+  dryRun: z.boolean().default(false),
+  /** Documents whose exported file may be replaced or recreated despite an external change. */
+  overwrite: z.array(identifier).max(1000).default([]),
+  confirm: z.literal(true).optional(),
+}).strict().refine(value => value.dryRun || value.confirm === true, { message: 'Confirm the export, or request a dry run first', path: ['confirm'] });

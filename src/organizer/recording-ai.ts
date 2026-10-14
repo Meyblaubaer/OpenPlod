@@ -5,8 +5,13 @@ import { textSelection } from '../ai/config';
 import { completeText, TextProviderError } from '../ai/text';
 
 const id = z.string().uuid();
+export const conversationUpdateSchema = z.object({
+  title: z.string().trim().min(1).max(120).refine(value => !/[\x00-\x1f]/.test(value), 'Use a title without control characters').nullable().optional(),
+  archived: z.boolean().optional(),
+}).strict().refine(value => value.title !== undefined || value.archived !== undefined, 'Change the title or archive state');
+export const conversationListSchema = z.object({ archived: z.enum(['true', 'false']).default('false') }).strict();
 export const questionSchema = z.object({ id: id, conversationId: id, recordingIds: z.array(id).min(1).max(12), question: z.string().trim().min(1).max(4000), consent: z.literal(true), expectedProvider: z.enum(['mistral', 'openai', 'anthropic', 'ollama']).optional() }).strict();
-import type { AiSource, AiAnswer } from './recording-ai-types';
+import type { AiSource, AiAnswer, AiConversationSummary } from './recording-ai-types';
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 export const normalizeSourceReferences = (text: string) => text.replace(/\[(S\d+(?:\s*,\s*S\d+)+)\]/g, (_match, ids: string) => ids.split(',').map(value => `[${value.trim()}]`).join(' '));
 const failure = (status: 400 | 404 | 409 | 413 | 503, code: string, message: string): never => { throw new OrganizerError(status, code, message); };
@@ -20,7 +25,8 @@ export class RecordingAi {
     store.database.exec(`CREATE TABLE IF NOT EXISTS ai_turns (
       id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, request_hash TEXT NOT NULL, recording_ids TEXT NOT NULL,
       question TEXT NOT NULL, state TEXT NOT NULL, result TEXT, created_at TEXT NOT NULL);
-      CREATE INDEX IF NOT EXISTS idx_ai_conversation ON ai_turns(conversation_id, created_at);`);
+      CREATE INDEX IF NOT EXISTS idx_ai_conversation ON ai_turns(conversation_id, created_at);
+      CREATE TABLE IF NOT EXISTS ai_conversations (id TEXT PRIMARY KEY, title TEXT, archived_at TEXT, updated_at TEXT NOT NULL);`);
   }
   private loadContexts(recordingIds: string[]) {
     const ordered: string[] = [];
@@ -75,8 +81,15 @@ export class RecordingAi {
     this.loadContexts(ordered);
     return rows.map(row => JSON.parse(row.result));
   }
-  conversations() {
-    const rows = this.store.database.query("SELECT conversation_id AS id,question,recording_ids AS ids,created_at AS createdAt FROM ai_turns WHERE state='ready' ORDER BY created_at DESC LIMIT 200").all() as { id: string; question: string; ids: string; createdAt: string }[];
+  /** Saved conversations, newest activity first. Archived ones are listed only when asked for. */
+  conversations(input: unknown = {}): AiConversationSummary[] {
+    const archived = conversationListSchema.parse(input).archived === 'true';
+    // SQLite returns the bare columns from the row holding max(created_at): the latest question.
+    const rows = this.store.database.query(`SELECT a.conversation_id AS id, a.question, a.recording_ids AS ids, max(a.created_at) AS createdAt, count(*) AS turns,
+        c.title, c.archived_at AS archivedAt
+      FROM ai_turns a LEFT JOIN ai_conversations c ON c.id=a.conversation_id WHERE a.state='ready'
+      GROUP BY a.conversation_id HAVING (c.archived_at IS NOT NULL)=? ORDER BY createdAt DESC LIMIT 200`).all(archived ? 1 : 0) as
+      { id: string; question: string; ids: string; createdAt: string; turns: number; title: string | null; archivedAt: string | null }[];
     const parsed = rows.map(row => {
       let ids: string[] | null = null;
       try {
@@ -86,12 +99,42 @@ export class RecordingAi {
       return { row, ids };
     });
     const ready = this.readyIds(parsed.flatMap(item => item.ids ?? []));
-    const seen = new Set<string>();
-    return parsed.filter(({ row, ids }) => {
-      if (seen.has(row.id)) return false;
-      seen.add(row.id);
-      return !!ids && ids.every(recordingId => ready.has(recordingId));
-    }).slice(0, 30).map(({ row, ids }) => ({ id: row.id, question: row.question, createdAt: row.createdAt, recordingIds: ids! }));
+    return parsed.filter(({ ids }) => !!ids && ids.every(recordingId => ready.has(recordingId))).slice(0, 30)
+      .map(({ row, ids }) => ({ id: row.id, title: row.title, question: row.question, createdAt: row.createdAt, recordingIds: ids!, turns: row.turns, archived: !!row.archivedAt }));
+  }
+  /** Rename or archive a conversation. Metadata only: saved answers are never changed. */
+  updateConversation(conversationId: string, input: unknown): AiConversationSummary {
+    id.parse(conversationId);
+    const data = conversationUpdateSchema.parse(input);
+    if (!this.store.database.query("SELECT 1 FROM ai_turns WHERE conversation_id=? AND state='ready' LIMIT 1").get(conversationId)) failure(404, 'conversation_not_found', 'Conversation not found.');
+    const now = new Date().toISOString();
+    const current = this.store.database.query('SELECT title, archived_at AS archivedAt FROM ai_conversations WHERE id=?').get(conversationId) as { title: string | null; archivedAt: string | null } | null;
+    const title = data.title === undefined ? current?.title ?? null : data.title;
+    const archivedAt = data.archived === undefined ? current?.archivedAt ?? null : data.archived ? current?.archivedAt ?? now : null;
+    this.store.database.query('INSERT INTO ai_conversations(id, title, archived_at, updated_at) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title, archived_at=excluded.archived_at, updated_at=excluded.updated_at')
+      .run(conversationId, title, archivedAt, now);
+    const summary = this.conversations({ archived: archivedAt ? 'true' : 'false' }).find(row => row.id === conversationId);
+    // A conversation outside the 30 most recent is still updated; describe it without the list.
+    return summary ?? { id: conversationId, title, question: '', recordingIds: [], createdAt: now, turns: 0, archived: !!archivedAt };
+  }
+  /** The complete conversation, with every cited quote resolved to its recording, time, and transcript version. */
+  exportConversation(conversationId: string, format: 'md' | 'json') {
+    const answers = this.history(conversationId);
+    if (!answers.length) failure(404, 'conversation_not_found', 'Conversation not found.');
+    const meta = this.store.database.query('SELECT title, archived_at AS archivedAt FROM ai_conversations WHERE id=?').get(conversationId) as { title: string | null; archivedAt: string | null } | null;
+    const title = meta?.title || answers[0].question;
+    if (format === 'json') return { title, body: JSON.stringify({ schemaVersion: '1', id: conversationId, title, archived: !!meta?.archivedAt, exportedAt: new Date().toISOString(), turns: answers }, null, 2) };
+    const time = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+    const turns = answers.map(answer => {
+      const cited = answer.citations.map(citation => {
+        const source = answer.sources.find(row => row.id === citation.sourceId);
+        if (!source) return `- [${citation.sourceId}] ${citation.quote}`;
+        return `- [${source.id}] ${source.title}${source.start === null ? '' : ` (${time(source.start)})`}, recording ${source.recordingId}${source.versionId ? `, version ${source.versionId}` : ''}: "${citation.quote.replace(/\s+/g, ' ')}"`;
+      });
+      return [`## ${answer.question.replace(/\s+/g, ' ')}`, answer.answer.trim(), ...(cited.length ? ['### Sources', cited.join('\n')] : []),
+        `_${answer.provider} / ${answer.model} / ${answer.createdAt}_`].join('\n\n');
+    });
+    return { title, body: `# ${title.replace(/\s+/g, ' ')}\n\n${turns.join('\n\n')}\n` };
   }
   sources(recordingIds: string[]): AiSource[] {
     const sources: AiSource[] = [];
@@ -156,6 +199,8 @@ export class RecordingAi {
       const result: AiAnswer = { id: data.id, conversationId: data.conversationId, question: data.question, ...answer, sources,
         provider: response.provider, model: response.model, usage: response.usage, createdAt, trace };
       this.store.database.query("UPDATE ai_turns SET state='ready',result=? WHERE id=?").run(JSON.stringify(result), data.id);
+      // A follow-up question brings an archived conversation back to the main list.
+      this.store.database.query('UPDATE ai_conversations SET archived_at=NULL, updated_at=? WHERE id=? AND archived_at IS NOT NULL').run(new Date().toISOString(), data.conversationId);
       return result;
     } catch (error) {
       this.store.database.query("UPDATE ai_turns SET state='failed' WHERE id=?").run(data.id);

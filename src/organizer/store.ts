@@ -2,10 +2,10 @@ import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { toFtsQuery } from '../search/query';
-import { createFolderSchema, updateFolderSchema, createNoteSchema, updateNoteSchema, snapshotSchema, noteListSchema, identifier, revision } from './schemas';
+import { createFolderSchema, updateFolderSchema, createNoteSchema, updateNoteSchema, snapshotSchema, noteListSchema, identifier, revision, createViewSchema, updateViewSchema } from './schemas';
 import type {
   NoteFolder, NoteDocument, NoteSummary, NoteVersion, NotePage, NoteProperties, DocumentSource,
-  TranscriptVersionSummary, TranscriptVersionDetail, TranscriptVersionBacklinks,
+  TranscriptVersionSummary, TranscriptVersionDetail, TranscriptVersionBacklinks, SavedView,
 } from './types';
 
 export class OrganizerError extends Error {
@@ -99,8 +99,15 @@ export function initializeOrganizer(database: Database) {
     ) WITHOUT ROWID;
     CREATE INDEX IF NOT EXISTS note_tags_key ON note_tags(tag_key, document_id);
     CREATE INDEX IF NOT EXISTS note_documents_source ON note_documents(source_recording_id, source_version_id);
+    CREATE TABLE IF NOT EXISTS note_views (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, filters TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS note_views_name ON note_views(name COLLATE NOCASE);
   `);
 }
+const viewColumns = 'id, name, filters, revision, created_at AS createdAt, updated_at AS updatedAt';
+const normalizeView = (row: SavedView) => ({ ...row, filters: JSON.parse(row.filters as unknown as string) }) as SavedView;
 
 export class OrganizerStore {
   constructor(readonly database: Database) {}
@@ -264,6 +271,51 @@ export class OrganizerStore {
   tags(): { tag: string; count: number }[] {
     return this.database.query(`SELECT min(t.tag) AS tag, count(*) AS count FROM note_tags t JOIN note_documents d ON d.id=t.document_id
       WHERE d.deleted_at IS NULL GROUP BY t.tag_key ORDER BY t.tag_key`).all() as { tag: string; count: number }[];
+  }
+
+  /** Saved document views (KB-01). A view stores filters; the documents are listed live. */
+  views(): SavedView[] {
+    return (this.database.query(`SELECT ${viewColumns} FROM note_views ORDER BY name COLLATE NOCASE, id`).all() as SavedView[]).map(normalizeView);
+  }
+
+  private view(id: string): SavedView {
+    const row = this.database.query(`SELECT ${viewColumns} FROM note_views WHERE id=?`).get(identifier.parse(id)) as SavedView | null;
+    return row ? normalizeView(row) : fail(404, 'view_not_found', 'Saved view not found.');
+  }
+
+  private uniqueView(name: string, self = '') {
+    if (this.database.query('SELECT id FROM note_views WHERE name=? COLLATE NOCASE AND id<>?').get(name, self))
+      fail(409, 'view_exists', 'A saved view with that name already exists.');
+  }
+
+  createView(input: unknown): SavedView {
+    const data = createViewSchema.parse(input);
+    return this.database.transaction(() => {
+      if ((this.database.query('SELECT count(*) AS count FROM note_views').get() as { count: number }).count >= 100) fail(400, 'view_limit', 'The saved view limit is 100.');
+      this.uniqueView(data.name);
+      const id = crypto.randomUUID(), now = new Date().toISOString();
+      this.database.query('INSERT INTO note_views(id, name, filters, created_at, updated_at) VALUES(?,?,?,?,?)').run(id, data.name, JSON.stringify(data.filters), now, now);
+      return this.view(id);
+    })();
+  }
+
+  updateView(id: string, input: unknown): SavedView {
+    const data = updateViewSchema.parse(input);
+    return this.database.transaction(() => {
+      const current = this.view(id); this.checkRevision(current.revision, data.revision);
+      const name = data.name ?? current.name, filters = data.filters ?? current.filters;
+      this.uniqueView(name, current.id);
+      this.database.query('UPDATE note_views SET name=?, filters=?, revision=revision+1, updated_at=? WHERE id=?')
+        .run(name, JSON.stringify(filters), new Date().toISOString(), current.id);
+      return this.view(current.id);
+    })();
+  }
+
+  deleteView(id: string, expected: number) {
+    this.database.transaction(() => {
+      const current = this.view(id); this.checkRevision(current.revision, revision.parse(expected));
+      this.database.query('DELETE FROM note_views WHERE id=?').run(current.id);
+    })();
   }
 
   trash(id: string, expected: number): NoteDocument {

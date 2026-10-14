@@ -21,3 +21,25 @@
 .note-delivery-history h3 { margin-bottom: 8px; font-size: 13px; font-weight: 600; }
 .note-delivery-history > div { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; border-top: 1px solid var(--border); padding: 10px 0; }
 .note-delivery-history small { grid-column: 1 / -1; color: var(--muted-foreground); }
+/* Managed Markdown export (KB-02). */
+.notes-export { font-size: 13px; }
+.notes-export > p[role=status] { display: flex; align-items: center; gap: 8px; color: var(--muted-foreground); }
+.notes-export > p[role=status] svg { width: 16px; height: 16px; }
+.notes-export-note { display: flex; gap: 8px; align-items: start; color: var(--muted-foreground); line-height: 1.6; overflow-wrap: anywhere; margin: 8px 0; }
+.notes-export-note svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 2px; }
+.notes-export code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; overflow-wrap: anywhere; }
+.notes-export-status > div { display: grid; grid-template-columns: 110px 1fr; gap: 12px; padding: 6px 0; border-top: 1px solid var(--border); }
+.notes-export-status dt { color: var(--muted-foreground); }
+.notes-export section { margin-top: 20px; }
+.notes-export h3 { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.notes-export-counts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.notes-export-counts span { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; }
+.notes-export-counts span[data-action=conflict] { color: var(--destructive); border-color: color-mix(in srgb, var(--destructive) 40%, transparent); }
+.notes-export-items { max-height: 32dvh; overflow: auto; border-top: 1px solid var(--border); }
+.notes-export-items li { display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: center; gap: 2px 10px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+.notes-export-items li > em { font-style: normal; font-size: 12px; color: var(--muted-foreground); }
+.notes-export-items li[data-action=conflict] > label > span { color: var(--destructive); }
+.notes-export-items label { flex-direction: row; align-items: center; gap: 6px; margin: 0; font-weight: 500; font-size: 12px; }
+.note-dialog .notes-export-items input[type=checkbox] { width: auto; padding: 0; }
+.notes-export-items code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notes-export-items small { grid-column: 2; color: var(--muted-foreground); font-size: 11px; }

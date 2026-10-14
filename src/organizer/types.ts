@@ -52,3 +52,16 @@ export interface NoteDelivery {
   id: string; documentId: string; documentRevision: number; destinationId: string;
   state: 'pending' | 'sent' | 'unknown'; createdAt: string; statusCode: number | null;
 }
+export type SavedViewFilters = { folderId?: string; view: 'all' | 'starred' | 'trash'; q: string; sort: 'updated' | 'title'; tag?: string };
+export interface SavedView { id: string; name: string; filters: SavedViewFilters; revision: number; createdAt: string; updatedAt: string }
+
+/** Managed Markdown export (KB-02). */
+export type ExportAction = 'created' | 'updated' | 'moved' | 'unchanged' | 'conflict' | 'orphaned';
+export interface ExportItem { documentId: string; title: string | null; path: string; action: ExportAction; reason?: 'modified_externally' | 'deleted_externally' | 'not_a_file' }
+export interface ExportResult {
+  root: string; dryRun: boolean; exportedAt: string;
+  counts: Record<ExportAction, number>;
+  /** Every item except `unchanged`, which is only counted. */
+  items: ExportItem[];
+}
+export interface ExportStatus { configured: boolean; root: string | null; lastExportedAt: string | null; documentCount: number; error: string | null }
