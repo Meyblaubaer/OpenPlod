@@ -15,7 +15,7 @@ export class OpenPlodClient implements VaultClient {
   async request(path: string, method = 'GET', body?: unknown) {
     const target = new URL(path, this.origin);
     if (!path.startsWith('/api/') || target.origin !== this.origin || target.hash
-      || !/^\/api\/(v1\/(documents|folders|transcripts|tags|recordings|transcript-versions|jobs|views|exports\/markdown|transcription-profiles)(\/|$)|transcripts(\/|$))/.test(target.pathname)) throw new Error('Unsupported vault API path.');
+      || !/^\/api\/(v1\/((documents|folders|transcripts|tags|recordings|transcript-versions|jobs|views|transcription-profiles|collections|destinations)(\/|$)|exports\/markdown$|search$)|transcripts(\/|$))/.test(target.pathname)) throw new Error('Unsupported vault API path.');
     let response: Response;
     try {
       response = await this.fetcher(target.href, { method, redirect: 'error', signal: AbortSignal.timeout(20000),

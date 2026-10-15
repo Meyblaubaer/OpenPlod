@@ -9,6 +9,7 @@ import { getRuntime } from '@/lib/runtime'
 import { buildInfo, buildLabel } from '@/lib/build-info'
 import { AiSettingsPanel } from '@/components/AiSettingsPanel'
 import { TranscriptionProfilesPanel } from '@/components/TranscriptionProfilesPanel'
+import { SearchIndexPanel } from '@/components/SearchIndexPanel'
 import { ONBOARDING_EVENT, onboardingApi } from '@/lib/ai-settings'
 
 function Toggle({ checked, onChange, label, description }: { checked: boolean; onChange: (v: boolean) => void; label: string; description: string }) {
@@ -130,6 +131,7 @@ export function SettingsPage() {
 
       <AiSettingsPanel />
       <TranscriptionProfilesPanel />
+      <SearchIndexPanel />
 
       {/* Sync */}
       <Card>

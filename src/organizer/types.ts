@@ -57,14 +57,25 @@ export interface SavedView { id: string; name: string; filters: SavedViewFilters
 
 /** Managed Markdown export (KB-02). */
 export type ExportAction = 'created' | 'updated' | 'moved' | 'unchanged' | 'conflict' | 'orphaned';
-export interface ExportItem { documentId: string; title: string | null; path: string; action: ExportAction; reason?: 'modified_externally' | 'deleted_externally' | 'not_a_file' }
+export interface ExportItem {
+  /** The note, or for an attachment the first note citing it ('' when no active note does). */
+  documentId: string; title: string | null; path: string; action: ExportAction; reason?: 'modified_externally' | 'deleted_externally' | 'not_a_file';
+  kind?: 'note' | 'attachment';
+  /** `audio:<recordingId>` or `transcript:<versionId>`; pass it in `overwriteAttachments` to replace a conflicting attachment. */
+  attachmentKey?: string;
+}
 export interface ExportResult {
   root: string; dryRun: boolean; exportedAt: string;
   counts: Record<ExportAction, number>;
   /** Every item except `unchanged`, which is only counted. */
   items: ExportItem[];
 }
-export interface ExportStatus { configured: boolean; root: string | null; lastExportedAt: string | null; documentCount: number; error: string | null }
+export interface ExportStatus {
+  configured: boolean; root: string | null;
+  /** `env`: OPENPLOD_EXPORT_DIR, which locks the folder; `settings`: chosen in the app. */
+  source: 'env' | 'settings' | null; locked: boolean;
+  lastExportedAt: string | null; documentCount: number; attachmentCount: number; error: string | null;
+}
 
 /** Reviewable AI title and tag suggestions (KB-05); see `suggestions.ts`. */
 export interface DocumentSuggestions {

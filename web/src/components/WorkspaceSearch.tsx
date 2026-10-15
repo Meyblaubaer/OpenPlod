@@ -5,8 +5,13 @@ import { ArrowRight, AudioLines, Bluetooth, FileAudio, FileText, FolderHeart, Ho
 import { ONBOARDING_EVENT } from "@/lib/ai-settings";
 import { api } from "@/lib/api";
 import { apiUrl, authenticatedHeaders } from "@/lib/runtime";
+import { knowledgeApi, recordingLink } from "@/lib/knowledge";
+import { formatDuration } from "@/lib/utils";
+import "./knowledge.css";
 
-type Result = { id: string; title: string; kind: string; to: string };
+type Result = { id: string; title: string; kind: string; to: string; detail?: string };
+/** `keyword`: titles and words; `passages`: hybrid search returning cited passages (KB-04). */
+type SearchMode = "keyword" | "passages";
 type Action = { id: string; label: string; hint: string; icon: typeof Home; to?: string; event?: string; keywords: string };
 /** Quick actions shown before and alongside search results. */
 const ACTIONS: Action[] = [
@@ -36,7 +41,9 @@ export function WorkspaceSearch() {
     [rows, setRows] = useState<Result[]>([]);
   const [loading, setLoading] = useState(false),
     [error, setError] = useState(""),
-    [active, setActive] = useState(0);
+    [active, setActive] = useState(0),
+    [mode, setMode] = useState<SearchMode>("keyword"),
+    [note, setNote] = useState("");
   const navigate = useNavigate();
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
@@ -54,6 +61,28 @@ export function WorkspaceSearch() {
     const timer = setTimeout(async () => {
       setLoading(true);
       setError("");
+      setNote("");
+      if (mode === "passages") {
+        try {
+          const result = await knowledgeApi.search(query.trim(), { mode: "hybrid", limit: 12, signal: abort.signal });
+          if (abort.signal.aborted) return;
+          setNote(result.embedding.kind === "lexical" ? "Lexical index (built-in, offline)" : `${result.embedding.kind === "local" ? "Local" : "Cloud"} embeddings: ${result.embedding.model}`);
+          setRows(result.passages.map((passage) => passage.sourceType === "transcript" && passage.recordingId
+            ? {
+                id: passage.id,
+                title: passage.recordingTitle?.replace(/\.[^.]+$/, "") || "Recording",
+                kind: passage.startTime === null ? "Passage" : `Passage ${formatDuration(passage.startTime)}`,
+                to: recordingLink(passage.recordingId, passage.startTime, passage.versionId),
+                detail: passage.text.slice(0, 180),
+              }
+            : { id: passage.id, title: passage.documentTitle || "Document", kind: "Document passage", to: `/notes?document=${passage.documentId}`, detail: passage.text.slice(0, 180) }));
+        } catch (e) {
+          if (!abort.signal.aborted) setError((e as Error).message);
+        } finally {
+          if (!abort.signal.aborted) setLoading(false);
+        }
+        return;
+      }
       try {
         const headers = authenticatedHeaders();
         const [recordings, transcripts, documents] = await Promise.all([
@@ -107,7 +136,7 @@ export function WorkspaceSearch() {
       clearTimeout(timer);
       abort.abort();
     };
-  }, [query, open]);
+  }, [query, open, mode]);
   const term = query.trim();
   const actions = (term ? ACTIONS.filter((action) => matches(action, term)).slice(0, 5) : ACTIONS);
   const visible: Item[] = [
@@ -163,6 +192,13 @@ export function WorkspaceSearch() {
                 setLoading(e.target.value.trim().length >= 2);
               }}
             />
+            <div className="command-mode" role="radiogroup" aria-label="Search mode">
+              {(["keyword", "passages"] as const).map((value) => (
+                <button key={value} type="button" role="radio" aria-checked={mode === value} onClick={() => { setMode(value); setRows([]); setActive(0); setLoading(query.trim().length >= 2); }}>
+                  {value === "keyword" ? "Keyword" : "Passages"}
+                </button>
+              ))}
+            </div>
             <Dialog.Close aria-label="Close search">
               <X />
             </Dialog.Close>
@@ -185,6 +221,7 @@ export function WorkspaceSearch() {
                   <span>
                     {title}
                     <small>{kind}</small>
+                    {item.kind === "result" && item.row.detail && <small className="command-detail">{item.row.detail}</small>}
                   </span>
                   {item.kind === "action" && <ArrowRight className="command-go" />}
                 </button>
@@ -192,6 +229,7 @@ export function WorkspaceSearch() {
             })}
             {loading && <Loader2 className="animate-spin" />}
             {error && <p role="alert">{error}</p>}
+            {mode === "passages" && note && !loading && <p className="command-note">{note}</p>}
             {query.trim().length >= 2 && !loading && !rows.length && !error && !visible.length && (
               <p>No results found.</p>
             )}

@@ -1,0 +1,47 @@
+/* Knowledge workspace: collections, hybrid search, chat context (0.7.0). */
+.action-menu [role="menuitemcheckbox"] { display: flex; min-height: 34px; cursor: pointer; align-items: center; gap: 9px; border-radius: 4px; padding: 0 10px; outline: none; font-size: 13px; }
+.action-menu [role="menuitemcheckbox"][data-highlighted], .action-menu .action-menu-sub[data-highlighted], .action-menu .action-menu-sub[data-state="open"] { background: var(--secondary); }
+.action-menu .action-menu-chevron { margin-left: auto; }
+@media (pointer: coarse) { .action-menu [role="menuitemcheckbox"] { min-height: 44px; } }
+
+.sidebar-collections { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.sidebar-collections > small { padding: 4px 10px; color: var(--muted-foreground); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.sidebar-collections .nav-item span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-collections .nav-count { margin-left: auto; }
+
+.studio-collection-tools { display: flex; align-items: center; gap: 6px; }
+
+.knowledge-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.knowledge-chips button { max-width: 100%; border: 1px solid var(--border); border-radius: 999px; background: var(--background); padding: 5px 11px; color: var(--foreground); font-size: 12.5px; text-align: left; }
+.knowledge-chips button:hover, .knowledge-chips button:focus-visible { background: var(--secondary); }
+
+.knowledge-used { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted-foreground); font-size: 12px; }
+.knowledge-used a { display: inline-flex; max-width: 100%; align-items: center; gap: 4px; overflow: hidden; border-radius: 4px; background: var(--secondary); padding: 2px 7px; color: var(--foreground); text-overflow: ellipsis; white-space: nowrap; }
+.knowledge-used svg { width: 13px; height: 13px; flex-shrink: 0; }
+
+.knowledge-passage { display: grid; gap: 4px; border-top: 1px solid var(--border); padding: 8px 0; }
+.knowledge-passage p { margin: 0; overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; }
+.knowledge-passage small { color: var(--muted-foreground); font-size: 11.5px; }
+
+.knowledge-field { display: grid; gap: 6px; font-size: 13px; }
+.knowledge-field textarea, .knowledge-field input, .knowledge-field select { width: 100%; border: 1px solid var(--border); border-radius: 6px; background: var(--background); padding: 7px 9px; color: var(--foreground); font: inherit; }
+.knowledge-field textarea { min-height: 84px; resize: vertical; }
+.knowledge-note { margin: 0; color: var(--muted-foreground); font-size: 12px; line-height: 1.45; }
+.knowledge-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.knowledge-row > * { min-width: 0; }
+.knowledge-suggestion { display: grid; gap: 8px; border: 1px solid var(--border); border-radius: 7px; padding: 10px; }
+.knowledge-suggestion label { display: flex; align-items: center; gap: 8px; font-size: 13px; overflow-wrap: anywhere; }
+.knowledge-topic-preview { max-height: 46vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 7px; padding: 10px 12px; }
+.knowledge-panel { display: grid; gap: 12px; }
+.knowledge-panel h2, .knowledge-panel h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.ai-source-row { display: flex; align-items: center; gap: 2px; }
+.ai-source-row > .ai-source-choice { flex: 1; min-width: 0; }
+.ai-source-row > button[aria-pressed=true] { color: var(--primary); }
+.ai-project-context { margin-top: 14px; padding: 8px 4px; border-top: 1px solid var(--border); }
+
+.command-mode { display: flex; flex: none; gap: 2px; border: 1px solid var(--border); border-radius: 6px; padding: 2px; }
+.command-input .command-mode button { border-radius: 4px; padding: 3px 8px; color: var(--muted-foreground); font-size: 12px; }
+.command-input .command-mode button[aria-checked="true"] { background: var(--secondary); color: var(--foreground); }
+.command-results .command-detail { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+.command-results > p.command-note { padding: 6px 12px; font-size: 11.5px; }
+@media (max-width: 520px) { .command-input { flex-wrap: wrap; } .command-input input { flex-basis: 60%; } }

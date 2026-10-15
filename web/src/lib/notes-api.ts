@@ -46,7 +46,9 @@ export const notesApi = {
     return payload.data as DocumentSuggestions
   },
   exportStatus: (signal?: AbortSignal) => request<ExportStatus>('/exports/markdown', 'GET', undefined, signal),
-  exportMarkdown: (data: { dryRun: boolean; overwrite?: string[] }) => request<ExportResult>('/exports/markdown', 'POST', data.dryRun ? data : { ...data, confirm: true }),
+  exportMarkdown: (data: { dryRun: boolean; overwrite?: string[]; overwriteAttachments?: string[]; attachments?: { audio: boolean; transcript: boolean } }) => request<ExportResult>('/exports/markdown', 'POST', data.dryRun ? data : { ...data, confirm: true }),
+  /** Choose (or clear) the export folder. Always explicitly confirmed; refused while OPENPLOD_EXPORT_DIR is set. */
+  setExportFolder: (path: string | null) => request<ExportStatus>('/exports/markdown/folder', 'PUT', { path, confirm: true }),
   source: (id: string, signal?: AbortSignal) => request<DocumentSource>(`/documents/${id}/source`, 'GET', undefined, signal),
   backlinks: (versionId: string, signal?: AbortSignal) => request<TranscriptVersionBacklinks>(`/transcript-versions/${versionId}/backlinks`, 'GET', undefined, signal),
   trash: (id: string, revision: number) => request<NoteDocument>(`/documents/${id}`, 'DELETE', { revision }),

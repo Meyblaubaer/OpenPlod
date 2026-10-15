@@ -10,7 +10,8 @@ export function createRecordingAiApi(ai: RecordingAi) {
   app.use('*', bodyLimit({ maxSize: 32768 }));
   app.onError((e, c) => c.json({ success: false, error: e instanceof OrganizerError ? e.message : 'Invalid AI request.' }, e instanceof OrganizerError ? e.status : 400));
   app.get('/conversations', c => c.json({ success: true, data: ai.conversations(c.req.query()) }));
-  app.get('/conversations/:id', c => c.json({ success: true, data: ai.history(c.req.param('id')) }));
+  app.get('/conversations/:id/context', c => c.json({ success: true, data: ai.context(c.req.param('id')) }));
+  app.get('/conversations/:id', c =>c.json({ success: true, data: ai.history(c.req.param('id')) }));
   app.patch('/conversations/:id', async c => c.json({ success: true, data: ai.updateConversation(c.req.param('id'), await c.req.json()) }));
   app.get('/conversations/:id/export', c => {
     const format = z.enum(['md', 'json']).parse(c.req.query('format') || 'md');

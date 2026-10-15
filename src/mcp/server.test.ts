@@ -6,7 +6,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { initializeOrganizer, OrganizerStore } from '../organizer/store';
 import { createOrganizerApi } from '../api/organizer';
-import { createMcpServer } from './server';
+import { createMcpServer, parseScopes, type McpScope, type VaultClient } from './server';
 import { OpenPlodClient } from './client';
 import { JobQueue } from '../jobs/queue';
 import { createJobsApi } from '../api/jobs';
@@ -143,4 +143,81 @@ test('read-only MCP exposes source, version, and job tools without any write pat
     expect(methods.every(method => method === 'GET')).toBe(true);
     expect(providerCalls).toBe(0);
   } finally { await client.close(); await server.close(); }
+});
+
+test('OPENPLOD_MCP_SCOPES parses scopes, keeps OPENPLOD_MCP_WRITE compatible, and rejects unknown scopes (KB-07)', () => {
+  expect([...parseScopes({})]).toEqual(['read']);
+  expect([...parseScopes({ OPENPLOD_MCP_WRITE: '1' })].sort()).toEqual(['read', 'write:documents', 'write:folders']);
+  expect([...parseScopes({ OPENPLOD_MCP_SCOPES: 'process, deliver write:documents' })].sort()).toEqual(['deliver', 'process', 'read', 'write:documents']);
+  expect(() => parseScopes({ OPENPLOD_MCP_SCOPES: 'read,admin' })).toThrow('Unknown OPENPLOD_MCP_SCOPES entry: admin');
+});
+
+async function connectScoped(access: boolean | McpScope[], vault: VaultClient) {
+  const server = createMcpServer(vault, access);
+  const client = new Client({ name: 'openplod-test', version: '1.0.0' });
+  const [left, right] = InMemoryTransport.createLinkedPair();
+  await server.connect(left); await client.connect(right);
+  const call = async (name: string, args: Record<string, unknown>) => {
+    const response = await client.callTool({ name, arguments: args }) as { isError?: boolean; content: { text: string }[] };
+    return { isError: Boolean(response.isError), body: response.content[0]!.text };
+  };
+  return { client, call, close: async () => { await client.close(); await server.close(); } };
+}
+const toolNames = async (access: boolean | McpScope[]) => {
+  const { client, close } = await connectScoped(access, { request: async () => ({}) });
+  try { return (await client.listTools()).tools.map(tool => tool.name); } finally { await close(); }
+};
+
+test('each scope registers only its own tools; search and collections are read tools', async () => {
+  const readOnly = await toolNames([]);
+  for (const name of ['search', 'list_collections', 'get_collection']) expect(readOnly).toContain(name);
+  for (const name of ['create_document', 'create_folder', 'start_transcription', 'send_document']) expect(readOnly).not.toContain(name);
+  const folders = await toolNames(['write:folders']);
+  expect(folders).toContain('create_folder'); expect(folders).not.toContain('create_document');
+  const documents = await toolNames(['write:documents']);
+  expect(documents).toContain('update_document'); expect(documents).not.toContain('update_folder');
+  const processing = await toolNames(['process']);
+  expect(processing).toContain('start_transcription'); expect(processing).not.toContain('create_document');
+  const deliver = await toolNames(['deliver']);
+  expect(deliver).toContain('send_document'); expect(deliver).not.toContain('start_transcription');
+  const legacy = await toolNames(true);
+  expect(legacy).toContain('create_folder'); expect(legacy).toContain('create_document'); expect(legacy).not.toContain('start_transcription');
+  expect(await toolNames(false)).toEqual(readOnly);
+});
+
+test('start_transcription requires confirm, reports cloud consent, and passes the idempotency key', async () => {
+  const requests: { path: string; method: string; body: any }[] = [];
+  let plan: { provider: string; model: string | null; local: boolean; requiresCloudConsent: boolean } = { provider: 'mistral', model: 'voxtral-mini-latest', local: false, requiresCloudConsent: true };
+  const vault: VaultClient = { request: async (path, method = 'GET', body) => {
+    requests.push({ path, method, body });
+    return (body as { dryRun?: boolean })?.dryRun ? { plan, job: null } : { plan, replayed: false, job: { id: 'job-1', state: 'pending' } };
+  } };
+  const { call, close } = await connectScoped(['process'], vault);
+  try {
+    const recordingId = crypto.randomUUID();
+    expect((await call('start_transcription', { recordingId, idempotencyKey: 'k1' })).isError).toBe(true);
+    expect(requests).toEqual([]);
+    const refused = await call('start_transcription', { recordingId, confirm: true, idempotencyKey: 'k1' });
+    expect(refused.isError).toBe(true);
+    expect(refused.body).toContain('mistral');
+    expect(refused.body).toContain('acceptCloudProvider');
+    expect(requests).toEqual([{ path: '/api/v1/jobs', method: 'POST', body: { type: 'process-recording', recordingId, dryRun: true } }]);
+    const started = await call('start_transcription', { recordingId, confirm: true, acceptCloudProvider: true, idempotencyKey: 'k1' });
+    expect(JSON.parse(started.body)).toMatchObject({ job: { id: 'job-1' } });
+    expect(requests.at(-1)).toEqual({ path: '/api/v1/jobs', method: 'POST', body: { type: 'process-recording', recordingId, confirm: true, acceptCloudProvider: true, idempotencyKey: 'k1' } });
+    plan = { provider: 'whisper', model: null, local: true, requiresCloudConsent: false };
+    expect((await call('start_transcription', { recordingId, confirm: true, idempotencyKey: 'k2' })).isError).toBe(false);
+  } finally { await close(); }
+});
+
+test('the MCP client allowlist reaches search and collections but never export settings or reindexing', async () => {
+  const seen: string[] = [];
+  const client = new OpenPlodClient('http://127.0.0.1:3487', 'secret', async url => { seen.push(new URL(url).pathname); return Response.json({ success: true, data: null }); });
+  await client.request('/api/v1/search?q=budget');
+  await client.request('/api/v1/collections');
+  await client.request(`/api/v1/collections/${crypto.randomUUID()}`);
+  await client.request('/api/v1/exports/markdown');
+  for (const path of ['/api/v1/exports/markdown/folder', '/api/v1/search/settings', '/api/v1/search/reindex', '/api/ai/ask', '/api/recordings/x/reprocess'])
+    await expect(client.request(path, 'PUT', {})).rejects.toThrow('Unsupported');
+  expect(seen).toHaveLength(4);
 });
