@@ -335,4 +335,50 @@ Returns `409` with the refusal reason when a format is requested for a transcrip
 timings; timings are never invented or interpolated. `400` for an unsupported format, `404` when no
 saved transcript exists.
 
+### Transcript PDF
+
+`GET /api/recordings/:id/transcript/pdf[?versionId=<id>]` returns `application/pdf`, rendered on the
+server from the stored version (the current one when `versionId` is omitted). Timestamps appear only
+when the version has real provider timings; unknown metadata is printed as `unknown`. The built-in
+PDF fonts cover English and Western European text; any character they cannot show is drawn as `?`
+and the PDF states how many were replaced. The file is 7-bit ASCII. `404` for an unknown version or
+a recording without a transcript.
+
+### Saved structure
+
+`POST /api/recordings/:id/transcript/structure` (body `{ versionId? }`) extracts chapters, decisions,
+action items and open questions and returns them with a `proposalId`. Nothing is saved. Timestamps
+are resolved from the stored segments, never from the model; unstated owners and due dates are
+`null`. With `?format=` it returns the extraction as a download instead (unchanged behaviour).
+
+| Route | Meaning |
+| --- | --- |
+| `POST …/transcript/structures` `{ proposalId }` | Save a reviewed extraction. Each save is a new row; earlier rows are kept. `404` once the proposal expired (1 hour) or was already saved |
+| `GET …/transcript/structures` | Saved rows, newest first: `{ id, versionId, structure, provider, model, createdAt, current }`. `current` is false once the transcript moved to another version |
+| `GET …/transcript/structures/:structureId[?format=]` | One row, or a download in `markdown`, `chapters`, `csv`, `json`, `html` or `pdf`. No provider is called |
+| `DELETE …/transcript/structures/:structureId` | Delete one saved row |
+
+### Batch document generation
+
+`POST /api/recordings/batch/estimate` with `{ kind: "document", recordingIds }` returns
+`{ recordings, wouldRun, skipped, provider, model, usesCloudProvider, sendsTranscriptText: true,
+providerError, estimatedCost: null }`. Recordings without transcript text are skipped.
+
+`POST /api/recordings/batch` with `{ kind: "document", recordingIds, confirm: true, expectedProvider,
+style?, instructions?, folderId? }` starts the batch. Each item runs the normal document pipeline and
+saves a new note (with its source transcript version) in the chosen folder. `expectedProvider` must
+match the configured document provider (`409 provider_changed` otherwise). `{ kind: "document",
+confirm: true, retryOf }` re-runs only the failed items with the original batch's options.
+`GET /batch/:batchId` and `POST /batch/:batchId/cancel` work for both kinds.
+
+### Provider comparison
+
+`POST /api/recordings/:id/transcript/provider-comparisons` with `{ provider, model?, confirm: true }`
+queues an explicit second transcription of the saved audio with that provider only (no fallback).
+The result is an independent `generated` version whose provenance has `comparison: true`; it never
+becomes current automatically and never changes the recording's status or revision. A second request
+for the same provider while one is queued returns it with `alreadyQueued: true`. `400` without
+`confirm`, for an unconfigured or privacy-blocked provider; `409` when the recording has no
+transcript yet. `GET` on the same path returns `{ runs, available }`.
+
 The existing `/api/recordings`, `/api/transcripts`, `/api/plaud`, and `/api/mobile` routes are unchanged apart from accepting the optional API token through the shared authentication gate. Plaud extraction and recording ownership are not routed through the organizer. See [README.md](../README.md) for hardware and privacy limitations.

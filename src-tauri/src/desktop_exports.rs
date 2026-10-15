@@ -36,8 +36,9 @@ fn write_export(path: &Path, source: &mut impl std::io::Read) -> Result<(), Stri
 #[tauri::command]
 pub async fn export_document(app: tauri::AppHandle, filename: String, content: String) -> Result<bool, String> {
     let extension = Path::new(safe_filename(&filename)?).extension().and_then(|v| v.to_str());
-    if !matches!(extension, Some("md" | "txt" | "json")) || content.len() > 16 * 1024 * 1024 {
-        return Err("Document export must be Markdown, text, or JSON under 16 MB.".into());
+    // PDF exports from the server are ASCII-only, so they travel as text too.
+    if !matches!(extension, Some("md" | "txt" | "json" | "csv" | "html" | "pdf")) || content.len() > 16 * 1024 * 1024 {
+        return Err("Document export must be Markdown, text, JSON, CSV, HTML, or PDF under 16 MB.".into());
     }
     let vault = app.path().app_data_dir().map_err(|_| "Vault location is unavailable.")?;
     tauri::async_runtime::spawn_blocking(move || {

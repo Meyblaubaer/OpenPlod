@@ -27,6 +27,7 @@ import mobileApi from './api/mobile';
 import transcriptsApi from './api/transcripts';
 import { configuredSyncPath, purgeExpiredTrash } from './library/recording-library';
 import { saveGeneratedTranscript } from './library/transcript-history';
+import { runComparison } from './library/provider-compare';
 import { forwardRecordingWithRetry } from './library/forwarding';
 import { createAiSettingsApi } from './api/ai-settings';
 import { createJobsApi } from './api/jobs';
@@ -61,6 +62,8 @@ console.log('[Transcription] Engines:', Object.entries(engineStatus).map(([k, v]
 // ============================================
 
 jobQueue.register('process-recording', async (data: any, job) => {
+  // An explicit provider comparison (TS-11) saves an independent version and nothing else.
+  if (data.compare) return runComparison(sqlite, data, job);
   const { recordingId, filePath } = data;
   try {
   const recording = db.select().from(recordings).where(eq(recordings.id, recordingId)).get();

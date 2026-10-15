@@ -307,6 +307,14 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
     }).catch(failure => setError(failure instanceof Error ? failure.message : String(failure)))
   }
 
+  // Rendered by the server from the saved version, so the PDF is exactly that version (TS-09).
+  const exportPdf = () => {
+    if (!recording) return
+    void api.transcriptPdf(recording.id, selectedVersion?.id ?? recording.transcriptVersionId ?? null)
+      .then(content => exportDocument({ filename: `${safeName(recording.title)}.pdf`, content, mime: 'application/pdf' }))
+      .catch(failure => setError(failure instanceof Error ? failure.message : String(failure)))
+  }
+
   const exportAudio = () => {
     if (!recording) return
     if (supportsPlaudDevice()) {
@@ -362,6 +370,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
                 <DropdownMenu.Item onSelect={() => exportCurrent('md')}><FileText />Markdown document</DropdownMenu.Item>
                 <DropdownMenu.Item onSelect={() => exportCurrent('txt')}><FileText />Transcript text</DropdownMenu.Item>
                 <DropdownMenu.Item onSelect={() => exportCurrent('json')}><FileText />JSON with metadata</DropdownMenu.Item>
+                <DropdownMenu.Item disabled={recording.transcriptText === undefined} onSelect={exportPdf}><FileText />PDF document</DropdownMenu.Item>
                 <DropdownMenu.Item onSelect={exportAudio}><FileAudio />Original audio</DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>

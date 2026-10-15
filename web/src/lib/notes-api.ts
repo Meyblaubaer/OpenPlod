@@ -6,6 +6,11 @@ import type { NoteFolder, NoteDocument, NotePage, NoteVersion, NoteDestination, 
 /** Document templates offered by the backend (roadmap TS-07). */
 export const DOCUMENT_STYLES = ['notes', 'meeting', 'interview', 'lecture', 'brief', 'prd', 'email'] as const
 export type DocumentStyle = (typeof DOCUMENT_STYLES)[number]
+/** Picker labels for the templates, in the backend's order. */
+export const DOCUMENT_STYLE_LABEL: Record<DocumentStyle, string> = {
+  notes: 'Structured notes', meeting: 'Meeting minutes', interview: 'Interview notes', lecture: 'Lecture notes',
+  brief: 'Project brief', prd: 'Product requirements', email: 'Follow-up email',
+}
 export type { NoteFolder, NoteDocument, NoteSummary, NotePage, NoteVersion, NoteDestination, NoteDelivery, NoteProperties, DocumentSource, TranscriptVersionBacklinks, SavedView, SavedViewFilters } from '../../../src/organizer/types'
 export type { ExportResult, ExportStatus, ExportItem } from '../../../src/organizer/types'
 export type { DocumentSuggestions } from '../../../src/organizer/types'

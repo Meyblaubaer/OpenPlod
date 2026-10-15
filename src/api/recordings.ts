@@ -3,7 +3,7 @@
  * Extracted from hub/src/api/routes/recordings.ts, adapted for standalone SQLite.
  */
 
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { RecordingBookmarks } from '../library/bookmarks';
 import { db, sqlite } from '../db/client';
@@ -12,11 +12,19 @@ import { SUBTITLE_MIME, isSubtitleFormat, renderSubtitles, subtitleReadiness } f
 import { applyOperation, parseSegments, speakerLabels, type TranscriptOperation } from '../library/transcript-operations';
 import { compareVersions, type VersionRecord } from '../library/transcript-diff';
 import { createHash } from 'node:crypto';
-import { readAiConfig, textSelection } from '../ai/config';
+import { readAiConfig, readSettings, textSelection } from '../ai/config';
+import { ComparisonError, listComparisons, queueComparison, type ComparisonRequest } from '../library/provider-compare';
+import { TranscriptionRouter } from '../transcription/router';
 import { extractStructure, proposeCleanup, proposeTranslation, TranscriptAiError } from '../library/transcript-ai';
-import { isStructureFormat, renderStructure, STRUCTURE_EXTENSION, STRUCTURE_MIME } from '../library/structure-export';
+import { isStructureFormat, renderStructure, STRUCTURE_EXTENSION, STRUCTURE_FORMATS, STRUCTURE_MIME, type StructureFormat } from '../library/structure-export';
+import { StructureStore, StructureStoreError } from '../library/structure-store';
+import { transcriptPdf } from '../library/transcript-pdf';
+import type { TranscriptStructure } from '../library/transcript-ai';
 import { createCustomAction, customActionInput, deleteCustomAction, listCustomActions, runCustomAction, updateCustomAction } from '../library/custom-actions';
 import { BatchManager, summarize } from '../library/batch';
+import { assertFolder, documentBatchOptionsSchema, documentBatchRunner, documentCandidates, estimateDocumentBatch, type DocumentBatchOptions } from '../library/batch-documents';
+import { DocumentGenerationService } from '../organizer/generation';
+import { OrganizerStore } from '../organizer/store';
 import { eq, desc, and, sql, like } from 'drizzle-orm';
 import { jobQueue } from '../jobs/queue';
 import { estimateRecordings } from '../ai/spending';
@@ -300,10 +308,24 @@ function transcribedIds(ids: string[]): Set<string> {
     .all(JSON.stringify(ids)) as { id: string }[]).map(row => row.id));
 }
 
+/**
+ * Batch document generation (roadmap TS-10) runs one item at a time: each
+ * item is a provider call, and the document service already refuses more
+ * than two concurrent generations.
+ */
+const documentBatches = new BatchManager(1);
+const documentBatchOptions = new Map<string, DocumentBatchOptions>();
+let documentService: DocumentGenerationService | undefined;
+const documents = () => documentService ??= new DocumentGenerationService(new OrganizerStore(sqlite));
+const findBatch = (id: string) => batches.get(id) ?? documentBatches.get(id);
+const uniqueIds = (value: unknown): string[] =>
+  [...new Set((Array.isArray(value) ? value : []).filter((item): item is string => typeof item === 'string'))].slice(0, 500);
+
 app.post('/batch/estimate', async c => {
-  const body: { recordingIds?: string[] } = await c.req.json<{ recordingIds?: string[] }>().catch(() => ({}));
-  const ids = [...new Set((body.recordingIds ?? []).filter(value => typeof value === 'string'))];
+  const body: { recordingIds?: unknown; kind?: unknown } = await c.req.json<{ recordingIds?: unknown; kind?: unknown }>().catch(() => ({}));
+  const ids = uniqueIds(body.recordingIds);
   if (ids.length === 0) return c.json({ success: false, error: 'Select at least one recording.' }, 400);
+  if (body.kind === 'document') return c.json({ success: true, data: estimateDocumentBatch(sqlite, ids) });
   const config = readAiConfig(sqlite);
   const provider = config.transcriptionEngine ?? null;
   const transcribed = transcribedIds(ids), runnable = ids.filter(id => !transcribed.has(id));
@@ -316,16 +338,18 @@ app.post('/batch/estimate', async c => {
 });
 
 app.post('/batch', async c => {
-  const body: { recordingIds?: string[]; confirm?: boolean; retryOf?: string; confirmCost?: boolean } =
-    await c.req.json<{ recordingIds?: string[]; confirm?: boolean; retryOf?: string; confirmCost?: boolean }>().catch(() => ({}));
+  const body: { recordingIds?: unknown; confirm?: boolean; retryOf?: string; kind?: unknown; confirmCost?: boolean } & Record<string, unknown> =
+    await c.req.json<{ recordingIds?: unknown; confirm?: boolean; retryOf?: string; kind?: unknown; confirmCost?: boolean }>().catch(() => ({}));
   if (body.confirm !== true) {
     return c.json({ success: false, error: 'Confirm the batch before it runs; it may use a paid provider.' }, 400);
   }
+  if (body.kind === 'document') return startDocumentBatch(c, body);
   // Re-transcribing a finished recording is a second paid call, not batch work; it stays a per-recording action.
-  const requested = [...new Set((body.recordingIds ?? []).filter(value => typeof value === 'string'))].slice(0, 500);
+  const requested = uniqueIds(body.recordingIds);
   const transcribed = transcribedIds(requested);
   const ids = requested.filter(id => !transcribed.has(id));
   if (ids.length === 0 && !body.retryOf) return c.json({ success: false, error: 'Every selected recording already has a transcript.' }, 400);
+  if (body.retryOf && !batches.get(body.retryOf)) return c.json({ success: false, error: 'That batch is no longer available.' }, 404);
   const costConfirmed = body.confirmCost === true;
   if (ids.length && !costConfirmed) {
     const cost = estimateRecordings(sqlite, ids, readAiConfig(sqlite));
@@ -353,15 +377,60 @@ app.post('/batch', async c => {
   }
 });
 
+/**
+ * A document batch needs the provider the person confirmed. A retry re-runs
+ * only the failed items with the options of the original batch, so a retry
+ * can never quietly change the template, folder or provider.
+ */
+function startDocumentBatch(c: Context, body: { recordingIds?: unknown; retryOf?: string } & Record<string, unknown>) {
+  let options: DocumentBatchOptions;
+  let ids: string[] = [];
+  if (body.retryOf) {
+    const stored = documentBatchOptions.get(body.retryOf);
+    if (!stored || !documentBatches.get(body.retryOf)) return c.json({ success: false, error: 'That batch is no longer available.' }, 404);
+    options = stored;
+  } else {
+    const parsed = documentBatchOptionsSchema.safeParse({ style: body.style, instructions: body.instructions, folderId: body.folderId, expectedProvider: body.expectedProvider });
+    if (!parsed.success) return c.json({ success: false, code: 'invalid_input', error: 'Choose a template, a folder and up to 2,000 characters of instructions.' }, 400);
+    options = parsed.data;
+    const requested = uniqueIds(body.recordingIds);
+    const runnable = documentCandidates(sqlite, requested);
+    ids = requested.filter(id => runnable.has(id));
+    if (ids.length === 0) return c.json({ success: false, error: 'None of the selected recordings has a transcript to send.' }, 400);
+  }
+  if (!options.expectedProvider) return c.json({ success: false, error: 'Confirm which provider receives the transcripts.' }, 400);
+  let provider: string;
+  try { provider = textSelection(sqlite, 'document').provider; }
+  catch (error) { return c.json({ success: false, code: 'provider_unavailable', error: (error as Error).message }, 503); }
+  if (provider !== options.expectedProvider) {
+    return c.json({ success: false, code: 'provider_changed', error: 'The document provider changed. Review where the transcripts will be sent and confirm again.' }, 409);
+  }
+  try {
+    assertFolder(sqlite, options.folderId);
+    const job = documentBatches.start({
+      kind: 'document', recordingIds: ids, retryOf: body.retryOf, runner: documentBatchRunner(sqlite, documents(), options),
+    });
+    documentBatchOptions.set(job.id, options);
+    documentBatches.prune();
+    for (const id of documentBatchOptions.keys()) if (!documentBatches.get(id)) documentBatchOptions.delete(id);
+    return c.json({ success: true, data: { ...job, summary: summarize(job), options } }, 202);
+  } catch (error) {
+    return c.json({ success: false, error: error instanceof Error ? error.message : 'Batch could not start.' }, 400);
+  }
+}
+
 app.get('/batch/:batchId', c => {
-  const job = batches.get(c.req.param('batchId'));
+  const job = findBatch(c.req.param('batchId'));
   if (!job) return c.json({ success: false, error: 'That batch is no longer available.' }, 404);
   c.header('Cache-Control', 'no-store');
-  return c.json({ success: true, data: { ...job, summary: summarize(job) } });
+  const options = documentBatchOptions.get(job.id);
+  return c.json({ success: true, data: { ...job, summary: summarize(job), ...(options ? { options } : {}) } });
 });
 
-app.post('/batch/:batchId/cancel', c =>
-  c.json({ success: true, data: { cancelled: batches.cancel(c.req.param('batchId')) } }));
+app.post('/batch/:batchId/cancel', c => {
+  const id = c.req.param('batchId');
+  return c.json({ success: true, data: { cancelled: batches.cancel(id) || documentBatches.cancel(id) } });
+});
 
 /**
  * Reviewed AI operations over a transcript (roadmap TS-04, TS-05, TS-06).
@@ -466,8 +535,14 @@ app.post('/:id/transcript/translate/save', async c => {
 
 app.post('/:id/transcript/structure', async c => {
   const id = c.req.param('id');
-  const row = transcriptRow(id);
-  if (!row) return c.json({ success: false, error: 'Saved transcript not found.' }, 404);
+  const body: { versionId?: unknown } = await c.req.json<{ versionId?: unknown }>().catch(() => ({}));
+  // A specific saved version can be analysed; otherwise the current transcript.
+  const versionId = typeof body.versionId === 'string' && body.versionId ? body.versionId : null;
+  const row = versionId
+    ? sqlite.query('SELECT full_text AS fullText, segments, id AS versionId FROM transcript_versions WHERE recording_id = ? AND id = ?')
+      .get(id, versionId) as { fullText: string; segments: unknown; versionId: string | null } | null
+    : transcriptRow(id);
+  if (!row) return c.json({ success: false, error: versionId ? 'That transcript version does not exist.' : 'Saved transcript not found.' }, 404);
   // `format` turns the same extraction into a downloadable artefact (TS-09).
   const format = c.req.query('format');
   if (format !== undefined && !isStructureFormat(format)) {
@@ -476,14 +551,127 @@ app.post('/:id/transcript/structure', async c => {
   try {
     const segments = parseSegments(typeof row.segments === 'string' ? JSON.parse(row.segments) : row.segments);
     const structure = await extractStructure(segments, { selection: analysisSelection() });
-    if (format === undefined) return c.json({ success: true, data: structure });
-    const title = (sqlite.query('SELECT original_filename AS filename FROM recordings WHERE id = ?').get(id) as
-      { filename: string | null } | null)?.filename?.replace(/\.[^.]+$/, '') || 'Transcript analysis';
-    c.header('Content-Type', `${STRUCTURE_MIME[format]}; charset=utf-8`);
-    c.header('Content-Disposition', `attachment; filename="${id}.${STRUCTURE_EXTENSION[format]}"`);
-    c.header('Cache-Control', 'no-store');
-    return c.body(renderStructure(format, structure, title));
+    if (format === undefined) {
+      // Held for review, not saved: the client saves it by proposal ID (TS-06).
+      const proposal = structureStore().propose({ recordingId: id, versionId: row.versionId, sourceHash: sourceHash(row.fullText), structure });
+      return c.json({ success: true, data: { ...structure, proposalId: proposal.proposalId, versionId: row.versionId } });
+    }
+    return structureDownload(c, id, format, structure);
   } catch (error) { const { body, status } = aiFailure(error); return c.json(body, status); }
+});
+
+/** Recording title for export headings, or null when it has none. */
+const recordingTitle = (id: string): string | null =>
+  (sqlite.query('SELECT original_filename AS filename FROM recordings WHERE id = ?').get(id) as
+    { filename: string | null } | null)?.filename?.replace(/\.[^.]+$/, '') || null;
+
+function structureDownload(c: Context, id: string, format: StructureFormat, structure: TranscriptStructure) {
+  // PDF is binary-safe ASCII; only text formats carry a charset.
+  c.header('Content-Type', format === 'pdf' ? STRUCTURE_MIME.pdf : `${STRUCTURE_MIME[format]}; charset=utf-8`);
+  c.header('Content-Disposition', `attachment; filename="${id}.${STRUCTURE_EXTENSION[format]}"`);
+  c.header('Cache-Control', 'no-store');
+  return c.body(renderStructure(format, structure, recordingTitle(id) ?? 'Transcript analysis'));
+}
+
+/**
+ * Saved structure (roadmap TS-06).
+ *
+ * Saving takes the proposal ID from an extraction, never a structure body, so
+ * what is stored is exactly what this server extracted and resolved. Every
+ * save is a new row; regenerating keeps the earlier rows as history.
+ */
+let structureStoreInstance: StructureStore | undefined;
+const structureStore = () => structureStoreInstance ??= new StructureStore(sqlite);
+
+app.get('/:id/transcript/structures', c =>
+  c.json({ success: true, data: structureStore().list(c.req.param('id')) }));
+
+app.post('/:id/transcript/structures', async c => {
+  const body: { proposalId?: unknown } = await c.req.json<{ proposalId?: unknown }>().catch(() => ({}));
+  if (typeof body.proposalId !== 'string' || !body.proposalId) return c.json({ success: false, error: 'Run the analysis, review it, then save it.' }, 400);
+  try {
+    return c.json({ success: true, data: structureStore().save(c.req.param('id'), body.proposalId) }, 201);
+  } catch (error) {
+    if (error instanceof StructureStoreError) return c.json({ success: false, code: error.code, error: error.message }, error.status);
+    throw error;
+  }
+});
+
+app.get('/:id/transcript/structures/:structureId', c => {
+  const id = c.req.param('id');
+  const saved = structureStore().get(id, c.req.param('structureId'));
+  if (!saved) return c.json({ success: false, error: 'That saved analysis does not exist.' }, 404);
+  const format = c.req.query('format');
+  if (format === undefined) return c.json({ success: true, data: saved });
+  if (!isStructureFormat(format)) return c.json({ success: false, error: `Supported formats are ${STRUCTURE_FORMATS.join(', ')}.` }, 400);
+  return structureDownload(c, id, format, saved.structure);
+});
+
+app.delete('/:id/transcript/structures/:structureId', c =>
+  structureStore().remove(c.req.param('id'), c.req.param('structureId'))
+    ? c.json({ success: true })
+    : c.json({ success: false, error: 'That saved analysis does not exist.' }, 404));
+
+/**
+ * Transcript PDF (roadmap TS-09).
+ *
+ * Rendered on the server from the stored version, so the file is exactly the
+ * version selected, with no browser print step.
+ */
+app.get('/:id/transcript/pdf', c => {
+  const id = c.req.param('id');
+  const versionId = c.req.query('versionId');
+  const recording = sqlite.query('SELECT recorded_at AS recordedAt, source_provider AS sourceProvider FROM recordings WHERE id = ?')
+    .get(id) as { recordedAt: string | null; sourceProvider: string | null } | null;
+  if (!recording) return c.json({ success: false, error: 'Recording not found.' }, 404);
+  const current = transcriptRow(id);
+  const resolvedVersionId = versionId || current?.versionId || null;
+  const version = resolvedVersionId
+    ? sqlite.query('SELECT full_text AS fullText, segments, origin, provenance FROM transcript_versions WHERE recording_id = ? AND id = ?')
+      .get(id, resolvedVersionId) as { fullText: string; segments: unknown; origin: string; provenance: string | null } | null
+    : null;
+  if (versionId && !version) return c.json({ success: false, error: 'That transcript version does not exist.' }, 404);
+  const source = version ?? (current ? { ...current, origin: (sqlite.query('SELECT origin FROM transcripts WHERE recording_id = ?')
+    .get(id) as { origin: string } | null)?.origin ?? null, provenance: null } : null);
+  if (!source) return c.json({ success: false, error: 'Saved transcript not found.' }, 404);
+  const provenance = typeof source.provenance === 'string' ? JSON.parse(source.provenance) as Record<string, unknown> : null;
+  const { pdf } = transcriptPdf({
+    title: recordingTitle(id) ?? 'Transcript', recordedAt: recording.recordedAt, source: recording.sourceProvider,
+    versionId: version ? resolvedVersionId : null, origin: source.origin,
+    provider: typeof provenance?.provider === 'string' ? provenance.provider : null,
+    model: typeof provenance?.model === 'string' ? provenance.model : null,
+    fullText: source.fullText, segments: typeof source.segments === 'string' ? JSON.parse(source.segments) : source.segments,
+  });
+  c.header('Content-Type', 'application/pdf');
+  c.header('Content-Disposition', `attachment; filename="${id}.pdf"`);
+  c.header('Cache-Control', 'no-store');
+  return c.body(pdf);
+});
+
+/**
+ * Provider comparison (roadmap TS-11).
+ *
+ * `POST` queues an explicit, confirmed second run with another provider; the
+ * result is an independent version that is never promoted automatically.
+ * `GET` reports those runs and which providers could be used.
+ */
+const engineStatus = () => new TranscriptionRouter({}, readSettings(sqlite)).status();
+
+app.get('/:id/transcript/provider-comparisons', c => {
+  const id = c.req.param('id');
+  c.header('Cache-Control', 'no-store');
+  return c.json({ success: true, data: { runs: listComparisons(jobQueue, sqlite, id), available: engineStatus() } });
+});
+
+app.post('/:id/transcript/provider-comparisons', async c => {
+  const body: ComparisonRequest = await c.req.json<ComparisonRequest>().catch(() => ({}));
+  try {
+    const { job, alreadyQueued } = await queueComparison(jobQueue, sqlite, c.req.param('id'), body, engineStatus());
+    return c.json({ success: true, data: { jobId: job.id, status: job.status, alreadyQueued } }, 202);
+  } catch (error) {
+    if (error instanceof ComparisonError) return c.json({ success: false, error: error.message }, error.status);
+    throw error;
+  }
 });
 
 /**

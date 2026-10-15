@@ -125,6 +125,27 @@ export interface TranscriptStructure {
   timestampsAvailable: boolean
 }
 
+/** An extraction held for review; saving it by `proposalId` persists exactly this (TS-06). */
+export interface StructureProposal extends TranscriptStructure {
+  proposalId: string
+  versionId: string | null
+}
+
+/** A saved structure, tied to the transcript version it came from. */
+export interface SavedStructure {
+  id: string
+  recordingId: string
+  versionId: string | null
+  structure: TranscriptStructure
+  provider: string
+  model: string
+  createdAt: string
+  /** False once the transcript has moved to another version. */
+  current: boolean
+}
+
+export type StructureExportFormat = 'markdown' | 'chapters' | 'csv' | 'json' | 'html' | 'pdf'
+
 /** Whether a transcript can honestly be exported as subtitles. */
 export interface SubtitleReadiness {
   exportable: boolean
@@ -167,6 +188,40 @@ export interface BatchJob {
   cancelledAt: string | null
   active: boolean
   summary: { total: number; pending: number; running: number; complete: number; failed: number; cancelled: number }
+  /** Document batches only: what each item was created with. */
+  options?: DocumentBatchOptions
+}
+
+export interface DocumentBatchOptions {
+  style: string
+  instructions: string
+  folderId: string | null
+  expectedProvider?: string
+}
+
+/** What a document batch would do, so the person can confirm scope and destination (TS-10). */
+export interface DocumentBatchEstimate {
+  kind: 'document'
+  recordings: number
+  wouldRun: number
+  skipped: number
+  provider: string
+  model: string
+  usesCloudProvider: boolean
+  sendsTranscriptText: true
+  providerError: string | null
+  estimatedCost: null
+}
+
+/** One explicit second-provider run (TS-11). */
+export interface ProviderComparisonRun {
+  jobId: string
+  provider: string
+  status: 'pending' | 'running' | 'complete' | 'failed' | 'cancelled'
+  error: string | null
+  createdAt: string
+  completedAt: string | null
+  versionId: string | null
 }
 
 export interface BatchEstimate {
@@ -205,7 +260,7 @@ export interface Settings {
 }
 
 export interface TranscriptVersion {
-  provenance?: { provider?: string; model?: string; fingerprint?: string; startedAt?: string; completedAt?: string; usage?: Record<string, number> | null; options?: Record<string, unknown> } | null
+  provenance?: { provider?: string; model?: string; comparison?: boolean; fingerprint?: string; startedAt?: string; completedAt?: string; usage?: Record<string, number> | null; options?: Record<string, unknown> } | null
   segments?: string | { start: number; end: number; text: string; speaker?: number | string }[] | null
   id: string
   recordingId: string
@@ -647,6 +702,21 @@ export const api = {
     return res.data
   },
 
+  estimateDocumentBatch: async (recordingIds: string[]): Promise<DocumentBatchEstimate> => {
+    const res = await fetchJSON<ApiEnvelope<DocumentBatchEstimate>>('/recordings/batch/estimate', {
+      method: 'POST', body: JSON.stringify({ kind: 'document', recordingIds }), signal: AbortSignal.timeout(20000),
+    })
+    return res.data
+  },
+
+  /** `expectedProvider` is the provider the person confirmed; a change since then is refused. */
+  startDocumentBatch: async (recordingIds: string[], options: { style: string; instructions: string; folderId: string | null; expectedProvider: string } | { retryOf: string }): Promise<BatchJob> => {
+    const res = await fetchJSON<ApiEnvelope<BatchJob>>('/recordings/batch', {
+      method: 'POST', body: JSON.stringify({ kind: 'document', recordingIds, confirm: true, ...options }), signal: AbortSignal.timeout(30000),
+    })
+    return res.data
+  },
+
   getBatch: async (batchId: string): Promise<BatchJob> => {
     const res = await fetchJSON<ApiEnvelope<BatchJob>>(`/recordings/batch/${encodeURIComponent(batchId)}`, { signal: AbortSignal.timeout(20000) })
     return res.data
@@ -706,9 +776,56 @@ export const api = {
     })
   },
 
-  extractStructure: async (id: string): Promise<TranscriptStructure> => {
-    const res = await fetchJSON<ApiEnvelope<TranscriptStructure>>(`/recordings/${id}/transcript/structure`, {
-      method: 'POST', body: JSON.stringify({}), signal: AbortSignal.timeout(180000),
+  extractStructure: async (id: string, versionId?: string | null): Promise<StructureProposal> => {
+    const res = await fetchJSON<ApiEnvelope<StructureProposal>>(`/recordings/${id}/transcript/structure`, {
+      method: 'POST', body: JSON.stringify(versionId ? { versionId } : {}), signal: AbortSignal.timeout(180000),
+    })
+    return res.data
+  },
+
+  listStructures: async (id: string): Promise<SavedStructure[]> => {
+    const res = await fetchJSON<ApiEnvelope<SavedStructure[]>>(`/recordings/${id}/transcript/structures`, { signal: AbortSignal.timeout(20000) })
+    return res.data
+  },
+
+  saveStructure: async (id: string, proposalId: string): Promise<SavedStructure> => {
+    const res = await fetchJSON<ApiEnvelope<SavedStructure>>(`/recordings/${id}/transcript/structures`, {
+      method: 'POST', body: JSON.stringify({ proposalId }), signal: AbortSignal.timeout(20000),
+    })
+    return res.data
+  },
+
+  deleteStructure: async (id: string, structureId: string): Promise<void> => {
+    await fetchJSON<ApiEnvelope<unknown>>(`/recordings/${id}/transcript/structures/${encodeURIComponent(structureId)}`, {
+      method: 'DELETE', signal: AbortSignal.timeout(20000),
+    })
+  },
+
+  /** Download a server-rendered export as text. PDFs are ASCII-only, so they fit too. */
+  exportText: async (path: string): Promise<string> => {
+    const res = await fetch(apiUrl(`/recordings/${path}`), { headers: authenticatedHeaders(), signal: AbortSignal.timeout(60000) })
+    if (!res.ok) {
+      const payload = await res.json().catch(() => null) as { error?: string } | null
+      throw new Error(payload?.error || `Export failed: ${res.status}`)
+    }
+    return res.text()
+  },
+
+  structureExport: (id: string, structureId: string, format: StructureExportFormat): Promise<string> =>
+    api.exportText(`${id}/transcript/structures/${encodeURIComponent(structureId)}?format=${format}`),
+
+  transcriptPdf: (id: string, versionId?: string | null): Promise<string> =>
+    api.exportText(`${id}/transcript/pdf${versionId ? `?versionId=${encodeURIComponent(versionId)}` : ''}`),
+
+  providerComparisons: async (id: string): Promise<{ runs: ProviderComparisonRun[]; available: Record<string, boolean> }> => {
+    const res = await fetchJSON<ApiEnvelope<{ runs: ProviderComparisonRun[]; available: Record<string, boolean> }>>(
+      `/recordings/${id}/transcript/provider-comparisons`, { signal: AbortSignal.timeout(20000) })
+    return res.data
+  },
+
+  startProviderComparison: async (id: string, provider: string): Promise<{ jobId: string; alreadyQueued: boolean }> => {
+    const res = await fetchJSON<ApiEnvelope<{ jobId: string; alreadyQueued: boolean }>>(`/recordings/${id}/transcript/provider-comparisons`, {
+      method: 'POST', body: JSON.stringify({ provider, confirm: true }), signal: AbortSignal.timeout(20000),
     })
     return res.data
   },
