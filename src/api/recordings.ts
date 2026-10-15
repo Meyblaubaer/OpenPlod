@@ -19,6 +19,7 @@ import { createCustomAction, customActionInput, deleteCustomAction, listCustomAc
 import { BatchManager, summarize } from '../library/batch';
 import { eq, desc, and, sql, like } from 'drizzle-orm';
 import { jobQueue } from '../jobs/queue';
+import { estimateRecordings } from '../ai/spending';
 import { parseByteRange } from './audio';
 import { createReadStream } from 'fs';
 import { Readable } from 'stream';
@@ -285,9 +286,10 @@ app.post('/:id/transcript/custom-actions/:actionId', async c => {
  * Batch transcription (roadmap TS-10).
  *
  * `POST /batch` requires `confirm: true`, because a batch against a cloud
- * provider spends money. The estimate reports scope and provider rather than
- * a currency figure: providers price per second of audio or per token, and
- * OpenPlod does not know either before the call.
+ * provider spends money. The estimate reports scope, provider and an AI-10
+ * cost estimate from documented list prices (null when a price or duration is
+ * unknown). When the estimate exceeds the per-job threshold or the remaining
+ * monthly budget, `confirmCost: true` is also required (409 otherwise).
  */
 const batches = new BatchManager(2);
 
@@ -304,17 +306,18 @@ app.post('/batch/estimate', async c => {
   if (ids.length === 0) return c.json({ success: false, error: 'Select at least one recording.' }, 400);
   const config = readAiConfig(sqlite);
   const provider = config.transcriptionEngine ?? null;
-  const transcribed = transcribedIds(ids);
+  const transcribed = transcribedIds(ids), runnable = ids.filter(id => !transcribed.has(id));
+  const cost = runnable.length ? estimateRecordings(sqlite, runnable, config) : null;
   return c.json({ success: true, data: {
-    recordings: ids.length, wouldRun: ids.filter(id => !transcribed.has(id)).length,
+    recordings: ids.length, wouldRun: runnable.length,
     usesCloudProvider: provider !== null && provider !== 'whisper',
-    provider, estimatedCost: null,
+    provider, estimatedCost: cost,
   }});
 });
 
 app.post('/batch', async c => {
-  const body: { recordingIds?: string[]; confirm?: boolean; retryOf?: string } =
-    await c.req.json<{ recordingIds?: string[]; confirm?: boolean; retryOf?: string }>().catch(() => ({}));
+  const body: { recordingIds?: string[]; confirm?: boolean; retryOf?: string; confirmCost?: boolean } =
+    await c.req.json<{ recordingIds?: string[]; confirm?: boolean; retryOf?: string; confirmCost?: boolean }>().catch(() => ({}));
   if (body.confirm !== true) {
     return c.json({ success: false, error: 'Confirm the batch before it runs; it may use a paid provider.' }, 400);
   }
@@ -323,6 +326,11 @@ app.post('/batch', async c => {
   const transcribed = transcribedIds(requested);
   const ids = requested.filter(id => !transcribed.has(id));
   if (ids.length === 0 && !body.retryOf) return c.json({ success: false, error: 'Every selected recording already has a transcript.' }, 400);
+  const costConfirmed = body.confirmCost === true;
+  if (ids.length && !costConfirmed) {
+    const cost = estimateRecordings(sqlite, ids, readAiConfig(sqlite));
+    if (cost.confirmationRequired) return c.json({ success: false, code: 'cost_confirmation_required', error: `Confirm the estimated cost first. ${cost.reasons.join(' ')}`, data: cost }, 409);
+  }
   try {
     const job = batches.start({
       kind: 'transcribe', recordingIds: ids, retryOf: body.retryOf,
@@ -335,7 +343,7 @@ app.post('/batch', async c => {
         // through the import route, which may forward instead or do nothing when auto-transcribe is off.
         if (!jobQueue.activeJob('process-recording', recordingId))
           sqlite.query("UPDATE recordings SET status='pending', error_message=NULL WHERE id=?").run(recordingId);
-        await jobQueue.add('process-recording', { recordingId, filePath: row.filePath });
+        await jobQueue.add('process-recording', { recordingId, filePath: row.filePath, ...(costConfirmed ? { costConfirmed: true } : {}) });
       },
     });
     batches.prune();
@@ -842,9 +850,10 @@ app.post('/:id/reprocess', async (c) => {
     if (!recording || recording.retentionState !== 'active') return c.json({ success: false, error: 'Active recording not found' }, 404);
     const { aiConfigSchema, readAiConfig } = await import('../ai/config');
     const body = await c.req.text();
-    let config;
+    let config, costConfirmed = false;
     try {
-      const overrides = body.trim() ? JSON.parse(body) : {};
+      const { confirmCost, ...overrides } = body.trim() ? JSON.parse(body) : {};
+      costConfirmed = confirmCost === true;
       if (Object.keys(overrides).some(key => !key.startsWith('transcription'))) throw new Error('Unsupported override');
       config = aiConfigSchema.parse({ ...readAiConfig(sqlite), ...overrides });
       const { assertPrivacy } = await import('../ai/config');
@@ -858,8 +867,13 @@ app.post('/:id/reprocess', async (c) => {
     // The queue would hand back the in-flight job and drop these options; say so instead of
     // flipping a running job's status back to pending.
     if (jobQueue.activeJob('process-recording', id)) return c.json({ success: false, error: 'This recording is already being processed. Cancel that job before reprocessing.' }, 409);
+    // AI-10: an estimate over the per-job threshold or the remaining budget needs explicit confirmation.
+    if (!costConfirmed) {
+      const cost = estimateRecordings(sqlite, [id], config);
+      if (cost.confirmationRequired) return c.json({ success: false, code: 'cost_confirmation_required', error: `Confirm the estimated cost first. ${cost.reasons.join(' ')}`, data: cost }, 409);
+    }
     await db.update(recordings).set({ status: 'pending', errorMessage: null, processedAt: null }).where(eq(recordings.id, id));
-    await jobQueue.add('process-recording', { recordingId: id, filePath: recording.filePath, config });
+    await jobQueue.add('process-recording', { recordingId: id, filePath: recording.filePath, config, ...(costConfirmed ? { costConfirmed: true } : {}) });
 
     return c.json({ success: true, message: 'Queued for reprocessing' });
   } catch (error) {

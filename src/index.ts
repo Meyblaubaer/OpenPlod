@@ -34,6 +34,8 @@ import { createOnboardingApi } from './api/onboarding';
 import { createTranscriptionProfilesApi } from './api/transcription-profiles';
 import { aiConfigSchema, readAiConfig, readSettings, assertPrivacy } from './ai/config';
 import { effectiveTranscription } from './ai/transcription-profiles';
+import { runTranscription } from './transcription/job-runner';
+import { assemblyAiCancelHook } from './transcription/remote-cancel';
 import packageInfo from '../package.json';
 
 // ============================================
@@ -81,7 +83,8 @@ jobQueue.register('process-recording', async (data: any, job) => {
     { mistralApiKey: settings.mistralApiKey, deepgramApiKey: settings.deepgramApiKey, openaiApiKey: settings.openaiApiKey, assemblyaiApiKey: settings.assemblyaiApiKey },
   );
   const startedAt = new Date().toISOString();
-  const result = await router.transcribeFile(filePath, { ...options, signal: job.signal, checkpoint: job.checkpoint, onCheckpoint: job.saveCheckpoint });
+  // Cost gate, spend ledger and long-audio chunking (AI-08, AI-10) live in the runner.
+  const result = await runTranscription(sqlite, router, { jobId: job.id, recordingId, filePath, config, options, costConfirmed: data.costConfirmed === true, signal: job.signal, checkpoint: job.checkpoint, saveCheckpoint: job.saveCheckpoint });
   job.signal.throwIfAborted();
 
   if (result.success) {
@@ -94,7 +97,7 @@ jobQueue.register('process-recording', async (data: any, job) => {
       confidence: result.confidence,
       fingerprint: data.fingerprint,
       generationId: job.id,
-      provenance: { provider: result.engine, model: result.metadata?.model ?? null, fingerprint: data.fingerprint, options: { ...options, profile, ...(ignored.length ? { ignoredProfileHints: ignored } : {}) }, startedAt, completedAt: new Date().toISOString(), usage: result.metadata?.usage ?? null, language: result.metadata?.language ?? null },
+      provenance: { provider: result.engine, model: result.metadata?.model ?? null, fingerprint: data.fingerprint, options: { ...options, profile, ...(ignored.length ? { ignoredProfileHints: ignored } : {}) }, startedAt, completedAt: new Date().toISOString(), usage: result.metadata?.usage ?? null, language: result.metadata?.language ?? null, ...(result.metadata?.chunking ? { chunking: result.metadata.chunking } : {}) },
     });
 
     if (documentUpdated && settings.autoSummarize === 'true') {
@@ -123,6 +126,8 @@ jobQueue.register('process-recording', async (data: any, job) => {
     throw error;
   }
 });
+
+jobQueue.onCancel(assemblyAiCancelHook(sqlite));
 
 jobQueue.register('forward-recording', async (data: { recordingId: string }) => {
   await forwardRecordingWithRetry(data.recordingId);
@@ -231,7 +236,7 @@ app.put('/api/settings/:key', async (c) => {
 });
 
 // Jobs
-app.get('/api/jobs', (c) => c.json({ success: true, data: jobQueue.getJobs().map(({ data, ...job }) => ({ ...job, recordingId: (data as any).recordingId, provider: (data as any).config?.transcriptionEngine })), stats: jobQueue.getStats() }));
+app.get('/api/jobs', (c) => c.json({ success: true, data: jobQueue.getJobs().map(({ data, ...job }) => ({ ...job, checkpoint: job.checkpoint && { phase: job.checkpoint.phase, remoteId: job.checkpoint.remoteId, inFlight: job.checkpoint.inFlight, progress: job.checkpoint.progress }, recordingId: (data as any).recordingId, provider: (data as any).config?.transcriptionEngine })), stats: jobQueue.getStats() }));
 app.post('/api/jobs/:id/cancel', c => c.json({ success: jobQueue.cancel(c.req.param('id')) }));
 app.post('/api/jobs/:id/resume', c => c.json({ success: jobQueue.resume(c.req.param('id')) }));
 app.patch('/api/jobs/:id', async c => { const body = await c.req.json(); return c.json({ success: jobQueue.setPriority(c.req.param('id'), body.priority) }); });

@@ -1,25 +1,35 @@
 import type { Database } from 'bun:sqlite';
 import { sqlite } from '../db/client';
 import { readAiConfig } from '../ai/config';
+import type { LongCheckpoint } from '../transcription/long-audio';
 
 export interface Job<T = unknown> {
   id: string; type: string; data: T; status: 'pending' | 'running' | 'complete' | 'failed' | 'cancelled';
   error?: string; createdAt: Date; startedAt?: Date; completedAt?: Date; priority: number;
-  checkpoint?: { phase: string; remoteId?: string };
+  /** `inFlight: false` means no remote submission is outstanding, so restarting cannot double-submit paid work. */
+  checkpoint?: LongCheckpoint;
+  /** Automatic retries already made, and the earliest time the next one may run (ms since epoch). */
+  attempts?: number; notBefore?: number;
 }
+/** Best-effort remote clean-up after a cancel; resolves to a sentence describing the outcome, or null. */
+export type CancelHook = (job: Job) => Promise<string | null>;
 export type JobContext = { id: string; signal: AbortSignal; checkpoint?: Job['checkpoint']; saveCheckpoint: (checkpoint: NonNullable<Job['checkpoint']>) => void };
 type JobHandler<T = unknown> = (data: T, context: JobContext) => Promise<void>;
 const TERMINAL: Job['status'][] = ['complete', 'failed', 'cancelled'];
 /** Finished jobs are kept this long for status and audit, then dropped on startup. */
 const RETAIN_FINISHED_MS = 30 * 86400000;
 const RETAIN_FINISHED_COUNT = 1000;
+/** Bounded automatic retries: two, with backoff, and only for errors marked retryable before anything was sent. */
+const RETRY_DELAYS_MS = [5000, 30000];
+const restartable = (checkpoint: Job['checkpoint']) => Boolean(checkpoint?.remoteId) || checkpoint?.inFlight === false;
 
 export class JobQueue {
   private jobs: Job[] = [];
   private handlers = new Map<string, JobHandler<any>>();
   private processing = false;
   private controllers = new Map<string, AbortController>();
-  constructor(private database: Database) {
+  private cancelHooks: CancelHook[] = [];
+  constructor(private database: Database, private retryDelaysMs: number[] = RETRY_DELAYS_MS) {
     database.exec('CREATE TABLE IF NOT EXISTS processing_jobs(id TEXT PRIMARY KEY,payload TEXT NOT NULL)');
     const rows = database.query('SELECT id, payload FROM processing_jobs ORDER BY rowid').all() as { id: string; payload: string }[];
     const loaded = rows.map(row => {
@@ -36,7 +46,7 @@ export class JobQueue {
     for (const job of loaded) {
       if (expired.has(job.id)) continue;
       if (job.status === 'running') {
-        job.status = job.checkpoint?.remoteId ? 'pending' : 'failed';
+        job.status = restartable(job.checkpoint) ? 'pending' : 'failed';
         job.error = job.status === 'failed' ? 'Interrupted during processing. Provider outcome may be unknown; check usage before retrying.' : undefined;
         this.persist(job);
         // Otherwise the recording would show "transcribing" forever after a crash.
@@ -68,11 +78,15 @@ export class JobQueue {
     job.status = 'cancelled'; job.completedAt = new Date();
     job.error = job.checkpoint?.remoteId ? 'Local polling cancelled. Remote processing may continue.' : 'Cancelled. Any submitted provider request may still be billed.';
     if (job.type === 'process-recording') this.database.query("UPDATE recordings SET status='failed',error_message='Processing cancelled.' WHERE id=? AND retention_state='active'").run(String((job.data as any).recordingId));
-    this.persist(job); this.controllers.get(id)?.abort(); return true;
+    this.persist(job); this.controllers.get(id)?.abort();
+    for (const hook of this.cancelHooks) void hook(job).then(outcome => { if (outcome) { job.error = `${job.error} ${outcome}`; this.persist(job); } }).catch(() => {});
+    return true;
   }
+  /** Register best-effort remote cancellation (for example AssemblyAI). Hooks never change the cancelled state. */
+  onCancel(hook: CancelHook) { this.cancelHooks.push(hook); }
   resume(id: string) {
     const job = this.jobs.find(item => item.id === id);
-    if (!job?.checkpoint?.remoteId || !['failed', 'cancelled'].includes(job.status) || this.controllers.has(id)) return false;
+    if (!job || !restartable(job.checkpoint) || !['failed', 'cancelled'].includes(job.status) || this.controllers.has(id)) return false;
     const other = this.jobs.some(item => item.id !== id && ['pending', 'running'].includes(item.status) && (item.data as any).recordingId === (job.data as any).recordingId);
     if (other) return false;
     job.status = 'pending'; job.error = undefined; job.completedAt = undefined; this.persist(job);
@@ -89,21 +103,32 @@ export class JobQueue {
     this.processing = true;
     try {
       while (true) {
-        const job = this.jobs.filter(j => j.status === 'pending' && this.handlers.has(j.type)).sort((a, b) => b.priority - a.priority)[0];
+        const now = Date.now();
+        const job = this.jobs.filter(j => j.status === 'pending' && this.handlers.has(j.type) && (j.notBefore ?? 0) <= now).sort((a, b) => b.priority - a.priority)[0];
         if (!job) break;
+        job.notBefore = undefined;
         const controller = new AbortController(); this.controllers.set(job.id, controller);
         job.status = 'running'; job.startedAt = new Date(); this.persist(job);
         try {
           await this.handlers.get(job.type)!(job.data, { id: job.id, signal: controller.signal, checkpoint: job.checkpoint,
             saveCheckpoint: checkpoint => { job.checkpoint = checkpoint; this.persist(job); } });
-          if (!controller.signal.aborted) job.status = 'complete';
+          if (!controller.signal.aborted) { job.status = 'complete'; job.error = undefined; }
         } catch (error) {
-          if (!controller.signal.aborted) { job.status = 'failed'; job.error = error instanceof Error ? error.message : 'Processing failed.'; }
+          if (!controller.signal.aborted) { job.status = 'failed'; job.error = error instanceof Error ? error.message : 'Processing failed.'; this.scheduleRetry(job, error); }
         } finally {
-          job.completedAt = new Date(); this.persist(job); this.controllers.delete(job.id);
+          job.completedAt = (job.status as Job['status']) === 'pending' ? undefined : new Date(); this.persist(job); this.controllers.delete(job.id);
         }
       }
     } finally { this.processing = false; }
+  }
+  /** Retry a failed job only when its error is marked retryable and its checkpoint shows nothing outstanding remotely. */
+  private scheduleRetry(job: Job, error: unknown) {
+    const attempts = job.attempts ?? 0;
+    if ((error as { retryable?: unknown })?.retryable !== true || job.checkpoint?.inFlight !== false || job.checkpoint.remoteId || attempts >= this.retryDelaysMs.length) return;
+    const delay = this.retryDelaysMs[attempts];
+    job.attempts = attempts + 1; job.status = 'pending'; job.notBefore = Date.now() + delay;
+    job.error = `Retry ${job.attempts} of ${this.retryDelaysMs.length} scheduled after: ${job.error}`;
+    setTimeout(() => { void this.processNext(); }, delay + 1).unref?.();
   }
   getJob(id: string) { return this.jobs.find(job => job.id === id); }
   /** The queued or running job of this type for a recording, if any. */

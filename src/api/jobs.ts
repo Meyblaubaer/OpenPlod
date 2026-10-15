@@ -23,6 +23,10 @@ export interface JobDescriptor {
   provider: string | null;
   priority: number;
   checkpoint: { phase: string; remoteId: string | null } | null;
+  /** Chunked work done so far (AI-08), e.g. 2 of 5 audio chunks; null when the job is not measured in steps. */
+  progress: { done: number; total: number } | null;
+  /** Automatic retries already made (at most two, only before anything was sent). */
+  attempts: number;
   /** What the job produced. Transcript version ids are only listed once the version exists. */
   resultRefs: { transcriptVersionIds: string[] };
 }
@@ -61,6 +65,8 @@ export function describeJobs(database: Database, jobs: Job[]): JobDescriptor[] {
       provider: typeof data.config?.transcriptionEngine === 'string' ? data.config.transcriptionEngine : null,
       priority: job.priority,
       checkpoint: job.checkpoint ? { phase: job.checkpoint.phase, remoteId: job.checkpoint.remoteId ?? null } : null,
+      progress: job.checkpoint?.progress ? { done: job.checkpoint.progress.done, total: job.checkpoint.progress.total } : null,
+      attempts: job.attempts ?? 0,
       resultRefs: { transcriptVersionIds: versions.has(job.id) ? [job.id] : [] },
     };
   });

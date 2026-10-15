@@ -26,7 +26,7 @@ export function createRecordingAiApi(ai: RecordingAi) {
       const abort = new AbortController(); stream.onAbort(() => abort.abort());
       const timer = setInterval(() => { void stream.writeSSE({ event: 'keepalive', data: '{}' }).catch(() => abort.abort()); }, 10000);
       try {
-        const result = await ai.ask(input, async stage => { await stream.writeSSE({ event: 'progress', data: JSON.stringify({ stage, id: input.id, provider: 'mistral' }) }); }, AbortSignal.any([abort.signal, c.req.raw.signal]));
+        const result = await ai.ask(input, async stage => { await stream.writeSSE({ event: 'progress', data: JSON.stringify({ stage, id: input.id }) }); }, AbortSignal.any([abort.signal, c.req.raw.signal]));
         await stream.writeSSE({ event: 'result', data: JSON.stringify(result) });
       } catch (e) { await stream.writeSSE({ event: 'error', data: JSON.stringify({ error: e instanceof OrganizerError ? e.message : 'AI request failed.', id: input.id }) }); }
       finally { clearInterval(timer); }

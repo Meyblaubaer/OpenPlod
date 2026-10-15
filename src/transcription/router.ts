@@ -20,6 +20,12 @@ export class TranscriptionRouter {
       ['openai', new OpenAiEngine(credentials.openaiApiKey)], ['assemblyai', new AssemblyAiEngine(credentials.assemblyaiApiKey)],
     ]);
   }
+  /** The same engines and options with fallbacks removed, so every chunk of one recording uses one provider. */
+  primaryOnly(): TranscriptionRouter {
+    const copy = Object.create(TranscriptionRouter.prototype) as TranscriptionRouter;
+    copy.engines = this.engines; copy.config = { ...this.config, fallback: [] };
+    return copy;
+  }
   status(): Record<EngineName, boolean> { return Object.fromEntries([...this.engines].map(([name, engine]) => [name, engine.isAvailable()])) as Record<EngineName, boolean>; }
   private async run(call: (engine: TranscriptionEngine, options: TranscriptionOptions) => Promise<TranscriptionResult>, options?: TranscriptionOptions) {
     const errors: string[] = [];

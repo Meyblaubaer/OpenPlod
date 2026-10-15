@@ -3,9 +3,9 @@ import { z } from 'zod';
 import { OrganizerError, OrganizerStore } from './store';
 import { identifier, markdown, noteTitle } from './schemas';
 import type { DocumentGeneration } from './types';
-import { textSelection } from '../ai/config';
+import { textSelection, textProviders } from '../ai/config';
 import { documentTemplate, DOCUMENT_STYLES, type DocumentStyle } from './document-templates';
-import { completeText, TextProviderError } from '../ai/text';
+import { completeText, textProvenance, TextProviderError } from '../ai/text';
 
 export type GenerationFetch = (url: string, init: RequestInit) => Promise<Response>;
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -13,22 +13,24 @@ export const generateDocumentSchema = z.object({
   idempotencyKey: identifier, recordingId: identifier, versionId: identifier.nullable().default(null),
   title: noteTitle, style: z.enum(DOCUMENT_STYLES).default('notes'),
   instructions: z.string().trim().max(2000).default(''),
-  expectedProvider: z.enum(['mistral', 'openai', 'anthropic', 'ollama']).optional(),
+  expectedProvider: z.enum(textProviders).optional(),
 }).strict();
 const saveSchema = z.object({ folderId: identifier.nullable().default(null) }).strict();
-type Row = Omit<DocumentGeneration, 'steps'> & { steps: string; sourceHash: string; requestHash: string };
+type Row = Omit<DocumentGeneration, 'steps' | 'provenance'> & { steps: string; provenance: string | null; sourceHash: string; requestHash: string };
 
 export class DocumentGenerationService {
   private running = new Set<string>();
-  constructor(private store: OrganizerStore, private fetcher: GenerationFetch = fetch, private key = () => {
-    const row = store.database.query('SELECT value FROM user_settings WHERE key=?').get('mistralApiKey') as { value: string } | null;
-    return row?.value || process.env.MISTRAL_API_KEY;
-  }, private timeoutMs = 90000) {}
+  /** `key` is an optional legacy Mistral key source; by default keys come from shared AI settings (AI-11). */
+  constructor(private store: OrganizerStore, private fetcher: GenerationFetch = fetch, private key?: () => string | undefined, private timeoutMs = 90000) {
+    // AI-09: additive provenance column (provider that answered, usage, timing).
+    const columns = store.database.query('PRAGMA table_info(note_generations)').all() as { name: string }[];
+    if (columns.length && !columns.some(column => column.name === 'provenance')) store.database.exec('ALTER TABLE note_generations ADD COLUMN provenance TEXT');
+  }
 
   private row(id: string): Row {
     const row = this.store.database.query(`SELECT id, request_hash AS requestHash, recording_id AS recordingId,
       version_id AS versionId, source_hash AS sourceHash, state, provider, model, title, content, created_at AS createdAt,
-      document_id AS documentId, steps FROM note_generations WHERE id=?`).get(identifier.parse(id)) as Row | null;
+      document_id AS documentId, steps, provenance FROM note_generations WHERE id=?`).get(identifier.parse(id)) as Row | null;
     if (!row) throw new OrganizerError(404, 'generation_not_found', 'Document generation not found.');
     return row;
   }
@@ -36,7 +38,7 @@ export class DocumentGenerationService {
     const row = this.row(id);
     this.store.transcript(row.recordingId, row.versionId);
     const { sourceHash, requestHash, ...result } = row;
-    return { ...result, steps: JSON.parse(row.steps) };
+    return { ...result, steps: JSON.parse(row.steps), provenance: row.provenance ? JSON.parse(row.provenance) : null };
   }
 
   async generate(input: unknown, progress: (stage: string) => Promise<void>, signal?: AbortSignal): Promise<DocumentGeneration> {
@@ -86,7 +88,7 @@ export class DocumentGenerationService {
         throw new OrganizerError(503, 'provider_unstructured', 'The provider did not return a structured Markdown document. Nothing was saved.');
       this.store.transcript(data.recordingId, source.transcript.versionId);
       signal?.throwIfAborted();
-      this.store.database.query("UPDATE note_generations SET state='ready',content=?,model=? WHERE id=?").run(content, response.model, id);
+      this.store.database.query("UPDATE note_generations SET state='ready',content=?,model=?,provider=?,provenance=? WHERE id=?").run(content, response.model, response.provider, JSON.stringify(textProvenance(response)), id);
       await step('ready');
       return this.get(id);
     } catch (error) {
