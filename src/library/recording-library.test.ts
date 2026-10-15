@@ -33,8 +33,9 @@ const { FolderWatcher } = await import('../sync/folder-watcher');
 beforeAll(() => initializeDatabase());
 
 afterAll(() => {
-  sqlite.close();
-  rmSync(testRoot, { recursive: true, force: true });
+  // The database client is shared by every test file in this process, and whichever file
+  // imports it first fixes its path. Closing it or deleting its folder here breaks the files
+  // that run afterwards, so the temporary vault is left for the OS to clean up.
   restoreEnv('DATABASE_URL', previousDatabaseUrl);
   restoreEnv('OPENPLOD_LIBRARY_PATH', previousLibraryPath);
   restoreEnv('OPENPLOD_PAIRING_TOKEN', previousPairingToken);
