@@ -146,8 +146,8 @@ app.use('*', cors({
       return '';
     }
   },
-  allowHeaders: ['Content-Type', 'Range', 'X-OpenPlod-Token'],
-  exposeHeaders: ['Accept-Ranges', 'Content-Length', 'Content-Range'],
+  allowHeaders: ['Content-Type', 'Content-Range', 'Range', 'X-Chunk-SHA256', 'X-OpenPlod-Token'],
+  exposeHeaders: ['Accept-Ranges', 'Content-Length', 'Content-Range', 'Upload-Offset'],
 }));
 app.use('*', logger());
 app.use('/api/*', apiAccess);

@@ -227,6 +227,36 @@ export interface TranscriptDocument {
 export interface UploadAcknowledgement {
   recordingId: string
   added: boolean
+  /** SHA-256 of the audio the desktop stored; present when the vault reports it. */
+  fingerprint?: string
+  transferId?: string
+}
+
+export type ClientPermission = 'read' | 'write' | 'upload' | 'sync'
+
+/** A paired phone. `lastSeenAt` is the last authenticated request, never a live presence signal. */
+export interface PairedClient {
+  id: string
+  name: string
+  platform: string
+  permissions: ClientPermission[]
+  legacy: boolean
+  createdAt: string
+  pairingExpiresAt: string | null
+  lastSeenAt: string | null
+  lastSuccessfulSyncAt: string | null
+  revokedAt: string | null
+}
+
+export interface IssuedClient {
+  client: PairedClient
+  token: string
+}
+
+export interface ResumableUploadOptions {
+  fingerprint?: string
+  onTransfer?: (transferId: string, fingerprint: string) => void | Promise<void>
+  onProgress?: (sentBytes: number, totalBytes: number) => void
 }
 
 export interface DashboardStats {
@@ -791,6 +821,7 @@ export const api = {
       sourceRecordingId?: string
       durationMs?: number
     },
+    resumable?: ResumableUploadOptions,
   ): Promise<UploadAcknowledgement> => {
     const body = new FormData()
     body.append('file', file)
@@ -802,13 +833,57 @@ export const api = {
     if (metadata?.recordingType) body.append('recording_type', metadata.recordingType)
     if (metadata?.durationMs !== undefined) body.append('duration_ms', String(metadata.durationMs))
     if (fromMobile) {
+      try {
+        // Resumable transfer: a retry continues from the desktop's committed byte offset.
+        return await uploadResumable(file, file.name, {
+          recordedAt: metadata?.recordedAt ?? new Date().toISOString(),
+          context: metadata?.context,
+          recordingType: metadata?.recordingType,
+          sourceProvider: metadata?.sourceProvider === 'plaud' ? 'plaud' : 'opennotes',
+          sourceRecordingId: metadata?.sourceRecordingId,
+          durationMs: metadata?.durationMs,
+        }, { ...resumable, request: (path, init) => fetch(apiUrl(path), { ...init, headers: authenticatedHeaders(init.headers) }) })
+      } catch (error) {
+        if (!(error instanceof ResumableUnsupported)) throw error
+      }
+      if (resumable?.fingerprint) body.append('fingerprint', resumable.fingerprint)
       const res = await fetchJSON<ApiEnvelope<UploadAcknowledgement>>('/mobile/recordings', { method: 'POST', body })
       return res.data
     }
-    const res = await fetchJSON<ApiEnvelope<Array<{ recording: { id: string }; added: boolean }>>>('/recordings/import', { method: 'POST', body })
+    const res = await fetchJSON<ApiEnvelope<Array<{ recording: { id: string; fingerprint?: string }; added: boolean }>>>('/recordings/import', { method: 'POST', body })
     const imported = res.data[0]
     if (!imported) throw new Error('The vault did not acknowledge the recording.')
-    return { recordingId: imported.recording.id, added: imported.added }
+    return { recordingId: imported.recording.id, added: imported.added, fingerprint: imported.recording.fingerprint }
+  },
+
+  listPairedClients: async (): Promise<PairedClient[]> => {
+    const res = await fetchJSON<ApiEnvelope<PairedClient[]>>('/mobile/clients', { signal: AbortSignal.timeout(15000) })
+    return res.data
+  },
+
+  issuePairedClient: async (name?: string): Promise<IssuedClient> => {
+    const res = await fetchJSON<ApiEnvelope<IssuedClient>>('/mobile/clients', { method: 'POST', body: JSON.stringify(name ? { name } : {}) })
+    return res.data
+  },
+
+  renamePairedClient: async (id: string, name: string): Promise<PairedClient> => {
+    const res = await fetchJSON<ApiEnvelope<PairedClient>>(`/mobile/clients/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ name }) })
+    return res.data
+  },
+
+  setPairedClientPermissions: async (id: string, permissions: ClientPermission[]): Promise<PairedClient> => {
+    const res = await fetchJSON<ApiEnvelope<PairedClient>>(`/mobile/clients/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ permissions }) })
+    return res.data
+  },
+
+  revokePairedClient: async (id: string): Promise<PairedClient> => {
+    const res = await fetchJSON<ApiEnvelope<PairedClient>>(`/mobile/clients/${encodeURIComponent(id)}/revoke`, { method: 'POST' })
+    return res.data
+  },
+
+  rotatePairedClient: async (id: string): Promise<IssuedClient> => {
+    const res = await fetchJSON<ApiEnvelope<IssuedClient>>(`/mobile/clients/${encodeURIComponent(id)}/rotate`, { method: 'POST' })
+    return res.data
   },
 
   updateRecording: async (id: string, patch: Partial<Pick<Recording, 'title' | 'recordedAt' | 'recordingType' | 'context' | 'notes' | 'tags'>> & { revision: number }): Promise<Recording> => {
@@ -891,3 +966,4 @@ function parseRecordingTypes(value: RawSettings[string]): string[] {
   }
 }
 import { apiUrl, authenticatedHeaders } from '@/lib/runtime'
+import { ResumableUnsupported, uploadResumable } from '@/lib/mobile-upload'

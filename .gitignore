@@ -22,6 +22,8 @@ pairing-token
 *.p12
 *.keystore
 *.jks
+# Android release signing values (MOB-08); never committed.
+keystore.properties
 *.apk
 *.aab
 *.tsbuildinfo
