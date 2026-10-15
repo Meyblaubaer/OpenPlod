@@ -5,14 +5,16 @@ import {
 } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import {
-  api, speakerLabel, type CleanupProposal, type CustomAction, type CustomActionResult, type Recording,
-  type StudioSegment, type TranscriptDiff, type TranscriptStructure, type TranscriptVersion,
-  type TranslationProposal, type VersionComparison,
+  api, speakerLabel, type CleanupProposal, type CustomAction, type CustomActionResult, type ProviderComparisonRun,
+  type Recording, type SavedStructure, type StructureExportFormat, type StructureProposal, type StudioSegment,
+  type TranscriptDiff, type TranscriptStructure, type TranscriptVersion, type TranslationProposal, type VersionComparison,
 } from '@/lib/api'
+import { exportDocument, safeDocumentName } from '@/lib/document-export'
+import { providerVersionPair, versionTitle } from '@/lib/provider-versions'
 import './transcript-studio.css'
 
 /**
- * Transcript Studio (roadmap TS-02..TS-06, TS-09).
+ * Transcript Studio (roadmap TS-02..TS-06, TS-09, TS-11).
  *
  * Every destructive or AI-assisted action here is a two-step: propose, show
  * exactly what would change, then save on an explicit confirmation. Nothing in
@@ -332,6 +334,8 @@ function VersionsPanel({ recording, busy, run, onChanged }: {
   const [after, setAfter] = useState('')
   const [comparison, setComparison] = useState<VersionComparison | null>(null)
   const [loadError, setLoadError] = useState('')
+  // Bumped when a provider comparison finishes, so its new version appears.
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     let active = true
@@ -339,14 +343,20 @@ function VersionsPanel({ recording, busy, run, onChanged }: {
       .then(rows => { if (!active) return; setVersions(rows); setBefore(rows[1]?.id ?? ''); setAfter(rows[0]?.id ?? '') })
       .catch(failure => { if (active) setLoadError(message(failure)) })
     return () => { active = false }
-  }, [recording.id, recording.revision])
+  }, [recording.id, recording.revision, refreshKey])
 
   if (loadError) return <p className="tstudio-error" role="alert"><AlertCircle />{loadError}</p>
   if (!versions) return <p className="tstudio-empty">Loading versions…</p>
   if (versions.length === 0) return <p className="tstudio-empty">This transcript has no saved versions yet.</p>
 
   const label = (version: TranscriptVersion) =>
-    `${version.origin} · ${new Date(version.createdAt).toLocaleString()}`
+    `${versionTitle(version)} · ${new Date(version.createdAt).toLocaleString()}`
+
+  const providerPair = providerVersionPair(versions, recording.transcriptVersionId)
+  const beforeVersion = versions.find(version => version.id === before)
+  const afterVersion = versions.find(version => version.id === after)
+  const acrossProviders = Boolean(beforeVersion?.provenance?.provider && afterVersion?.provenance?.provider
+    && beforeVersion.provenance.provider !== afterVersion.provenance.provider)
 
   return (
     <div className="tstudio-panel">
@@ -370,10 +380,27 @@ function VersionsPanel({ recording, busy, run, onChanged }: {
         </Button>
       </div>
       {before === after && <p className="tstudio-hint">Choose two different versions.</p>}
+      {providerPair && (
+        <div className="tstudio-actions">
+          <Button variant="ghost" size="sm" disabled={Boolean(busy)}
+            onClick={() => void run('compare-providers', async () => {
+              const [first, second] = providerPair
+              setBefore(first.id); setAfter(second.id)
+              setComparison(await api.compareTranscriptVersions(recording.id, first.id, second.id))
+            })}>
+            {busy === 'compare-providers' ? <Loader2 className="tstudio-spin" /> : <History />}
+            Compare {providerPair.map(version => version.provenance?.provider).join(' with ')}
+          </Button>
+        </div>
+      )}
 
       {comparison && (
         <>
-          <p className="tstudio-change-kind">{CHANGE_KIND_LABEL[comparison.changeKind]}</p>
+          {acrossProviders && beforeVersion && afterVersion
+            ? <p className="tstudio-change-kind">
+              Two transcription providers: {versionTitle(beforeVersion)} (removed text) and {versionTitle(afterVersion)} (added text)
+            </p>
+            : <p className="tstudio-change-kind">{CHANGE_KIND_LABEL[comparison.changeKind]}</p>}
           <DiffView diff={comparison.diff} />
         </>
       )}
@@ -383,7 +410,7 @@ function VersionsPanel({ recording, busy, run, onChanged }: {
         {versions.map(version => (
           <li key={version.id}>
             <div>
-              <strong>{version.origin}</strong>
+              <strong>{versionTitle(version)}</strong>
               <small>{new Date(version.createdAt).toLocaleString()}</small>
             </div>
             {version.id === recording.transcriptVersionId
@@ -401,7 +428,119 @@ function VersionsPanel({ recording, busy, run, onChanged }: {
           </li>
         ))}
       </ul>
+
+      <ProviderComparison recording={recording} busy={busy} run={run} onVersionAdded={() => setRefreshKey(key => key + 1)} />
     </div>
+  )
+}
+
+const PROVIDER_LABEL: Record<string, string> = {
+  whisper: 'Whisper.cpp (local)', mistral: 'Mistral Voxtral', deepgram: 'Deepgram', openai: 'OpenAI', assemblyai: 'AssemblyAI',
+}
+
+// ---------------------------------------------------------------------------
+// TS-11 — compare transcription providers
+// ---------------------------------------------------------------------------
+
+const COMPARISON_POLL_MS = 3000
+
+function ProviderComparison({ recording, busy, run, onVersionAdded }: {
+  recording: Recording; busy: string; run: Runner; onVersionAdded: () => void
+}) {
+  const [runs, setRuns] = useState<ProviderComparisonRun[] | null>(null)
+  const [available, setAvailable] = useState<Record<string, boolean>>({})
+  const [provider, setProvider] = useState('')
+  const [confirmed, setConfirmed] = useState(false)
+  const [loadError, setLoadError] = useState('')
+  const added = useRef(onVersionAdded)
+  useEffect(() => { added.current = onVersionAdded }, [onVersionAdded])
+
+  const seen = useRef<ProviderComparisonRun[] | null>(null)
+  const apply = useCallback((data: { runs: ProviderComparisonRun[]; available: Record<string, boolean> }) => {
+    const previous = seen.current
+    seen.current = data.runs
+    // A run that just produced its version refreshes the version list.
+    if (previous && data.runs.some(next => next.versionId && !previous.some(old => old.jobId === next.jobId && old.versionId))) added.current()
+    setRuns(data.runs)
+    setAvailable(data.available)
+  }, [])
+  const load = useCallback(async () => { apply(await api.providerComparisons(recording.id)) }, [apply, recording.id])
+
+  useEffect(() => {
+    let active = true
+    api.providerComparisons(recording.id)
+      .then(data => { if (active) apply(data) })
+      .catch(failure => { if (active) setLoadError(message(failure)) })
+    return () => { active = false }
+  }, [apply, recording.id])
+
+  const pending = runs?.some(item => item.status === 'pending' || item.status === 'running') ?? false
+  useEffect(() => {
+    if (!pending) return
+    const timer = window.setInterval(() => { void load().catch(() => {}) }, COMPARISON_POLL_MS)
+    return () => window.clearInterval(timer)
+  }, [pending, load])
+
+  const choices = Object.entries(available).filter(([, ok]) => ok).map(([name]) => name)
+  const local = provider === 'whisper'
+
+  return (
+    <>
+      <h3>Compare transcription providers</h3>
+      <p className="tstudio-hint">
+        Transcribes the same saved audio with another provider. The result is a separate version; it never replaces
+        the current transcript unless you choose Make current.
+      </p>
+      {loadError && <p className="tstudio-error" role="alert"><AlertCircle />{loadError}</p>}
+      {choices.length === 0
+        ? <p className="tstudio-empty">No transcription provider is configured. Add one in AI settings.</p>
+        : (
+          <>
+            <div className="tstudio-row">
+              <label className="tstudio-field tstudio-field--inline"><span>Provider</span>
+                <select value={provider} onChange={event => { setProvider(event.target.value); setConfirmed(false) }}>
+                  <option value="">Choose a provider</option>
+                  {choices.map(name => <option key={name} value={name}>{PROVIDER_LABEL[name] ?? name}</option>)}
+                </select>
+              </label>
+            </div>
+            {provider && (
+              <label className="tstudio-confirm">
+                <input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />
+                {local
+                  ? 'I understand the audio is transcribed again locally with Whisper.cpp, which can take a while.'
+                  : `I understand the full audio is uploaded again to ${PROVIDER_LABEL[provider] ?? provider} and this run may be billed by that provider. Cost is not estimated here.`}
+              </label>
+            )}
+            <div className="tstudio-actions">
+              <Button size="sm" disabled={!provider || !confirmed || Boolean(busy)}
+                onClick={() => void run('provider-compare', async () => {
+                  const result = await api.startProviderComparison(recording.id, provider)
+                  setConfirmed(false)
+                  await load()
+                  return result.alreadyQueued
+                    ? `A ${provider} comparison is already queued for this recording.`
+                    : `Queued. The ${provider} version appears in the list above when it finishes.`
+                })}>
+                {busy === 'provider-compare' ? <Loader2 className="tstudio-spin" /> : <Speech />}Run comparison
+              </Button>
+            </div>
+          </>
+        )}
+      {runs && runs.length > 0 && (
+        <ul className="tstudio-versions">
+          {runs.map(item => (
+            <li key={item.jobId}>
+              <div>
+                <strong>{PROVIDER_LABEL[item.provider] ?? item.provider}</strong>
+                <small>{new Date(item.createdAt).toLocaleString()} · {item.status}{item.error ? ` · ${item.error}` : ''}</small>
+              </div>
+              {item.versionId && <span className="tstudio-current">Version saved</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   )
 }
 
@@ -583,20 +722,17 @@ function ActionsPanel({ recording, busy, run }: { recording: Recording; busy: st
 // TS-06 / TS-09 — structure and exports
 // ---------------------------------------------------------------------------
 
-function StructurePanel({ recording, busy, run }: { recording: Recording; busy: string; run: Runner }) {
-  const [structure, setStructure] = useState<TranscriptStructure | null>(null)
-  const [subtitles, setSubtitles] = useState<{ exportable: boolean; detail: string } | null>(null)
+const STRUCTURE_EXPORTS: { format: StructureExportFormat; label: string; extension: string; mime: string }[] = [
+  { format: 'markdown', label: 'Markdown', extension: 'md', mime: 'text/markdown' },
+  { format: 'pdf', label: 'PDF', extension: 'pdf', mime: 'application/pdf' },
+  { format: 'csv', label: 'Action items CSV', extension: 'csv', mime: 'text/csv' },
+  { format: 'chapters', label: 'Chapters', extension: 'txt', mime: 'text/plain' },
+  { format: 'json', label: 'JSON', extension: 'json', mime: 'application/json' },
+  { format: 'html', label: 'HTML', extension: 'html', mime: 'text/html' },
+]
 
-  useEffect(() => {
-    let active = true
-    api.subtitleReadiness(recording.id)
-      .then(value => { if (active) setSubtitles(value) })
-      .catch(() => { if (active) setSubtitles(null) })
-    return () => { active = false }
-  }, [recording.id, recording.revision])
-
-  const download = (path: string) => { window.open(`/api/recordings/${recording.id}${path}`, '_blank', 'noopener') }
-
+/** Read-only rendering of one structure. Unknown owners and dates are shown as not stated. */
+function StructureView({ structure }: { structure: TranscriptStructure }) {
   const timedList = (title: string, items: { text: string; startSeconds: number | null }[]) => items.length > 0 && (
     <>
       <h4>{title}</h4>
@@ -610,6 +746,66 @@ function StructurePanel({ recording, busy, run }: { recording: Recording; busy: 
       </ul>
     </>
   )
+  return (
+    <div className="tstudio-structure">
+      {!structure.timestampsAvailable && <p className="tstudio-hint">This transcript has no timings, so items are not time-linked.</p>}
+      {timedList('Chapters', structure.chapters.map(chapter => ({ text: chapter.title, startSeconds: chapter.startSeconds })))}
+      {timedList('Decisions', structure.decisions)}
+      {structure.actionItems.length > 0 && (
+        <>
+          <h4>Action items</h4>
+          <ul className="tstudio-items">
+            {structure.actionItems.map((item, index) => (
+              <li key={index}>
+                {item.startSeconds !== null && <span className="tstudio-time">{formatTime(item.startSeconds)}</span>}
+                {item.text}
+                <small> — owner: {item.owner ?? <span className="tstudio-unknown">not stated</span>}
+                  , due: {item.due ?? <span className="tstudio-unknown">not stated</span>}</small>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {timedList('Open questions', structure.openQuestions)}
+      {structure.chapters.length === 0 && structure.decisions.length === 0
+        && structure.actionItems.length === 0 && structure.openQuestions.length === 0
+        && <p className="tstudio-empty">Nothing was found in this transcript.</p>}
+      <p className="tstudio-hint">Generated by {structure.provider} {structure.model}. Review before relying on it.</p>
+    </div>
+  )
+}
+
+function StructurePanel({ recording, busy, run }: { recording: Recording; busy: string; run: Runner }) {
+  const [proposal, setProposal] = useState<StructureProposal | null>(null)
+  const [saved, setSaved] = useState<SavedStructure[] | null>(null)
+  const [selectedId, setSelectedId] = useState('')
+  const [loadError, setLoadError] = useState('')
+  const [subtitles, setSubtitles] = useState<{ exportable: boolean; detail: string } | null>(null)
+
+  useEffect(() => {
+    let active = true
+    api.subtitleReadiness(recording.id)
+      .then(value => { if (active) setSubtitles(value) })
+      .catch(() => { if (active) setSubtitles(null) })
+    return () => { active = false }
+  }, [recording.id, recording.revision])
+
+  useEffect(() => {
+    let active = true
+    api.listStructures(recording.id)
+      .then(rows => { if (!active) return; setSaved(rows); setSelectedId(current => current || rows[0]?.id || '') })
+      .catch(failure => { if (active) setLoadError(message(failure)) })
+    return () => { active = false }
+  }, [recording.id])
+
+  const reload = async (select?: string) => {
+    const rows = await api.listStructures(recording.id)
+    setSaved(rows)
+    setSelectedId(select ?? rows[0]?.id ?? '')
+  }
+
+  const download = (path: string) => { window.open(`/api/recordings/${recording.id}${path}`, '_blank', 'noopener') }
+  const selected = saved?.find(row => row.id === selectedId) ?? null
 
   return (
     <div className="tstudio-panel">
@@ -627,47 +823,89 @@ function StructurePanel({ recording, busy, run }: { recording: Recording; busy: 
           : <p className="tstudio-empty">{subtitles.detail}</p>}
 
       <h3>Analyse</h3>
-      <p className="tstudio-hint">Finds chapters, decisions, action items and open questions. Times come from the recording's own segments, never from the model.</p>
+      <p className="tstudio-hint">
+        Finds chapters, decisions, action items and open questions. Sends the transcript to your configured AI
+        provider; nothing is saved until you choose Save. Times come from the recording's own segments, never from the model.
+      </p>
       <div className="tstudio-actions">
         <Button variant="outline" size="sm" disabled={Boolean(busy)}
-          onClick={() => void run('structure', async () => { setStructure(await api.extractStructure(recording.id)) })}>
-          {busy === 'structure' ? <Loader2 className="tstudio-spin" /> : <Sparkles />}Analyse transcript
+          onClick={() => void run('structure', async () => { setProposal(await api.extractStructure(recording.id, recording.transcriptVersionId ?? null)) })}>
+          {busy === 'structure' ? <Loader2 className="tstudio-spin" /> : <Sparkles />}{saved?.length ? 'Regenerate' : 'Analyse transcript'}
         </Button>
-        {structure && (
+        {proposal && (
           <>
-            <Button variant="outline" size="sm" onClick={() => download('/transcript/structure?format=markdown')}><FileText />Markdown</Button>
-            <Button variant="outline" size="sm" onClick={() => download('/transcript/structure?format=csv')}><Download />Action items CSV</Button>
-            <Button variant="outline" size="sm" onClick={() => download('/transcript/structure?format=html')}><FileText />Print / PDF</Button>
+            <Button size="sm" disabled={Boolean(busy)}
+              onClick={() => void run('structure-save', async () => {
+                const row = await api.saveStructure(recording.id, proposal.proposalId)
+                setProposal(null)
+                await reload(row.id)
+                return 'Analysis saved. Earlier analyses are kept.'
+              })}>
+              {busy === 'structure-save' ? <Loader2 className="tstudio-spin" /> : <Check />}Save
+            </Button>
+            <Button variant="ghost" size="sm" disabled={Boolean(busy)} onClick={() => setProposal(null)}>Discard</Button>
           </>
         )}
       </div>
-      {structure && (
-        <div className="tstudio-structure">
-          {!structure.timestampsAvailable && <p className="tstudio-hint">This transcript has no timings, so items are not time-linked.</p>}
-          {timedList('Chapters', structure.chapters.map(chapter => ({ text: chapter.title, startSeconds: chapter.startSeconds })))}
-          {timedList('Decisions', structure.decisions)}
-          {structure.actionItems.length > 0 && (
-            <>
-              <h4>Action items</h4>
-              <ul className="tstudio-items">
-                {structure.actionItems.map((item, index) => (
-                  <li key={index}>
-                    {item.startSeconds !== null && <span className="tstudio-time">{formatTime(item.startSeconds)}</span>}
-                    {item.text}
-                    <small> — owner: {item.owner ?? <span className="tstudio-unknown">not stated</span>}
-                      , due: {item.due ?? <span className="tstudio-unknown">not stated</span>}</small>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-          {timedList('Open questions', structure.openQuestions)}
-          {structure.chapters.length === 0 && structure.decisions.length === 0
-            && structure.actionItems.length === 0 && structure.openQuestions.length === 0
-            && <p className="tstudio-empty">Nothing was found in this transcript.</p>}
-          <p className="tstudio-hint">Generated by {structure.provider} {structure.model}. Review before relying on it.</p>
-        </div>
+      {proposal && (
+        <>
+          <p className="tstudio-preview">Preview. Not saved yet.</p>
+          <StructureView structure={proposal} />
+        </>
       )}
+
+      <h3>Saved analyses</h3>
+      {loadError
+        ? <p className="tstudio-error" role="alert"><AlertCircle />{loadError}</p>
+        : saved === null
+          ? <p className="tstudio-empty">Loading saved analyses…</p>
+          : saved.length === 0
+            ? <p className="tstudio-empty">No saved analysis yet. Analyse the transcript, review the result, then save it.</p>
+            : (
+              <>
+                <div className="tstudio-row">
+                  <label className="tstudio-field"><span>Analysis</span>
+                    <select value={selectedId} onChange={event => setSelectedId(event.target.value)}>
+                      {saved.map(row => (
+                        <option key={row.id} value={row.id}>
+                          {new Date(row.createdAt).toLocaleString()} · {row.provider} {row.model}{row.current ? '' : ' · older transcript version'}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                {selected && (
+                  <>
+                    {!selected.current && (
+                      <p className="tstudio-hint">This analysis was made from an earlier transcript version. Regenerate to analyse the current one.</p>
+                    )}
+                    <div className="tstudio-actions">
+                      {STRUCTURE_EXPORTS.map(item => (
+                        <Button key={item.format} variant="outline" size="sm" disabled={Boolean(busy)}
+                          onClick={() => void run(`export-${item.format}`, async () => {
+                            const content = await api.structureExport(recording.id, selected.id, item.format)
+                            await exportDocument({ filename: `${safeDocumentName(recording.title)}-analysis.${item.extension}`, content, mime: item.mime })
+                          })}>
+                          {busy === `export-${item.format}` ? <Loader2 className="tstudio-spin" /> : item.format === 'csv' ? <Download /> : <FileText />}{item.label}
+                        </Button>
+                      ))}
+                      <Button variant="ghost" size="sm" disabled={Boolean(busy)}
+                        onClick={() => {
+                          if (!window.confirm('Delete this saved analysis? The transcript is not affected.')) return
+                          void run('structure-delete', async () => {
+                            await api.deleteStructure(recording.id, selected.id)
+                            await reload()
+                            return 'Analysis deleted.'
+                          })
+                        }}>
+                        <Trash2 />Delete
+                      </Button>
+                    </div>
+                    <StructureView structure={selected.structure} />
+                  </>
+                )}
+              </>
+            )}
     </div>
   )
 }

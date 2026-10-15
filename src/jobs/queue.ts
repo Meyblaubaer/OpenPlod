@@ -6,6 +6,12 @@ export interface Job<T = unknown> {
   id: string; type: string; data: T; status: 'pending' | 'running' | 'complete' | 'failed' | 'cancelled';
   error?: string; createdAt: Date; startedAt?: Date; completedAt?: Date; priority: number;
   checkpoint?: { phase: string; remoteId?: string };
+  /**
+   * Set only for explicit extra runs (a provider comparison). Such a job is
+   * deduplicated by this key instead of by recording, never counts as the
+   * recording's processing job, and never changes the recording's status.
+   */
+  dedupeKey?: string;
 }
 export type JobContext = { id: string; signal: AbortSignal; checkpoint?: Job['checkpoint']; saveCheckpoint: (checkpoint: NonNullable<Job['checkpoint']>) => void };
 type JobHandler<T = unknown> = (data: T, context: JobContext) => Promise<void>;
@@ -40,7 +46,7 @@ export class JobQueue {
         job.error = job.status === 'failed' ? 'Interrupted during processing. Provider outcome may be unknown; check usage before retrying.' : undefined;
         this.persist(job);
         // Otherwise the recording would show "transcribing" forever after a crash.
-        if (job.status === 'failed' && job.type === 'process-recording') database.query("UPDATE recordings SET status='failed', error_message=? WHERE id=? AND retention_state='active'")
+        if (job.status === 'failed' && job.type === 'process-recording' && !job.dedupeKey) database.query("UPDATE recordings SET status='failed', error_message=? WHERE id=? AND retention_state='active'")
           .run(job.error!, String((job.data as { recordingId?: unknown }).recordingId));
       }
       this.jobs.push(job);
@@ -48,16 +54,19 @@ export class JobQueue {
   }
   private persist(job: Job) { this.database.query('INSERT INTO processing_jobs VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(job.id, JSON.stringify(job)); }
   register<T>(type: string, handler: JobHandler<T>) { this.handlers.set(type, handler); queueMicrotask(() => { void this.processNext(); }); }
-  async add<T>(type: string, data: T, priority = 0): Promise<Job<T>> {
+  async add<T>(type: string, data: T, priority = 0, options: { dedupeKey?: string } = {}): Promise<Job<T>> {
     const input = data as Record<string, unknown>;
-    const existing = typeof input.recordingId === 'string' ? this.activeJob(type, input.recordingId) : undefined;
+    const existing = options.dedupeKey
+      ? this.jobs.find(job => job.type === type && job.dedupeKey === options.dedupeKey && ['pending', 'running'].includes(job.status))
+      : typeof input.recordingId === 'string' ? this.activeJob(type, input.recordingId) : undefined;
     if (existing) return existing as Job<T>;
     let savedData = data;
     if (type === 'process-recording') {
       const recording = this.database.query('SELECT fingerprint FROM recordings WHERE id=?').get(String(input.recordingId)) as { fingerprint: string | null } | null;
       savedData = { ...input, config: input.config ?? readAiConfig(this.database), fingerprint: recording?.fingerprint ?? null } as T;
     }
-    const job: Job<T> = { id: crypto.randomUUID(), type, data: savedData, priority, status: 'pending', createdAt: new Date() };
+    const job: Job<T> = { id: crypto.randomUUID(), type, data: savedData, priority, status: 'pending', createdAt: new Date(),
+      ...(options.dedupeKey ? { dedupeKey: options.dedupeKey } : {}) };
     this.persist(job); this.jobs.push(job);
     queueMicrotask(() => { void this.processNext(); });
     return job;
@@ -67,16 +76,16 @@ export class JobQueue {
     if (!job || !['pending', 'running'].includes(job.status)) return false;
     job.status = 'cancelled'; job.completedAt = new Date();
     job.error = job.checkpoint?.remoteId ? 'Local polling cancelled. Remote processing may continue.' : 'Cancelled. Any submitted provider request may still be billed.';
-    if (job.type === 'process-recording') this.database.query("UPDATE recordings SET status='failed',error_message='Processing cancelled.' WHERE id=? AND retention_state='active'").run(String((job.data as any).recordingId));
+    if (job.type === 'process-recording' && !job.dedupeKey) this.database.query("UPDATE recordings SET status='failed',error_message='Processing cancelled.' WHERE id=? AND retention_state='active'").run(String((job.data as any).recordingId));
     this.persist(job); this.controllers.get(id)?.abort(); return true;
   }
   resume(id: string) {
     const job = this.jobs.find(item => item.id === id);
     if (!job?.checkpoint?.remoteId || !['failed', 'cancelled'].includes(job.status) || this.controllers.has(id)) return false;
-    const other = this.jobs.some(item => item.id !== id && ['pending', 'running'].includes(item.status) && (item.data as any).recordingId === (job.data as any).recordingId);
+    const other = this.jobs.some(item => item.id !== id && item.dedupeKey === job.dedupeKey && ['pending', 'running'].includes(item.status) && (item.data as any).recordingId === (job.data as any).recordingId);
     if (other) return false;
     job.status = 'pending'; job.error = undefined; job.completedAt = undefined; this.persist(job);
-    if (job.type === 'process-recording') this.database.query("UPDATE recordings SET status='pending',error_message=NULL WHERE id=? AND retention_state='active'").run(String((job.data as any).recordingId));
+    if (job.type === 'process-recording' && !job.dedupeKey) this.database.query("UPDATE recordings SET status='pending',error_message=NULL WHERE id=? AND retention_state='active'").run(String((job.data as any).recordingId));
     queueMicrotask(() => { void this.processNext(); }); return true;
   }
   setPriority(id: string, priority: number) {
@@ -108,7 +117,7 @@ export class JobQueue {
   getJob(id: string) { return this.jobs.find(job => job.id === id); }
   /** The queued or running job of this type for a recording, if any. */
   activeJob(type: string, recordingId: string) {
-    return this.jobs.find(job => job.type === type && ['pending', 'running'].includes(job.status) && (job.data as { recordingId?: unknown })?.recordingId === recordingId);
+    return this.jobs.find(job => job.type === type && !job.dedupeKey && ['pending', 'running'].includes(job.status) && (job.data as { recordingId?: unknown })?.recordingId === recordingId);
   }
   /** Every retained job in submission order. Callers must not mutate it. */
   getAllJobs(): readonly Job[] { return this.jobs; }

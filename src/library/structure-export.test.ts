@@ -164,7 +164,8 @@ describe('format selection', () => {
   test('recognizes only the supported formats', () => {
     expect(isStructureFormat('markdown')).toBe(true);
     expect(isStructureFormat('csv')).toBe(true);
-    expect(isStructureFormat('pdf')).toBe(false);
+    expect(isStructureFormat('pdf')).toBe(true);
+    expect(isStructureFormat('docx')).toBe(false);
   });
 
   test('renders each format', () => {

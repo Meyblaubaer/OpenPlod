@@ -67,3 +67,7 @@
   .tstudio-field { flex: 1 1 100%; }
   .tstudio-versions li { flex-direction: column; align-items: flex-start; gap: 6px; }
 }
+
+/* Explicit acknowledgement before a second paid provider run (TS-11). */
+.tstudio-confirm { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 8px; font-size: 12px; line-height: 1.55; }
+.tstudio-confirm input { margin-top: 3px; flex-shrink: 0; }
