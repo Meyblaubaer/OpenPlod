@@ -8,6 +8,8 @@ export const DOCUMENT_STYLES = ['notes', 'meeting', 'interview', 'lecture', 'bri
 export type DocumentStyle = (typeof DOCUMENT_STYLES)[number]
 export type { NoteFolder, NoteDocument, NoteSummary, NotePage, NoteVersion, NoteDestination, NoteDelivery, NoteProperties, DocumentSource, TranscriptVersionBacklinks, SavedView, SavedViewFilters } from '../../../src/organizer/types'
 export type { ExportResult, ExportStatus, ExportItem } from '../../../src/organizer/types'
+export type { DocumentSuggestions } from '../../../src/organizer/types'
+import type { DocumentSuggestions } from '../../../src/organizer/types'
 
 async function request<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(apiUrl(`/v1${path}`), { method,
@@ -34,6 +36,15 @@ export const notesApi = {
   createView: (name: string, filters: Partial<SavedViewFilters>) => request<SavedView>('/views', 'POST', { name, filters }),
   updateView: (id: string, data: { name?: string; filters?: Partial<SavedViewFilters>; revision: number }) => request<SavedView>(`/views/${id}`, 'PATCH', data),
   deleteView: (id: string, revision: number) => request<null>(`/views/${id}`, 'DELETE', { revision }),
+  /** Reviewable AI title and tag suggestions; nothing is changed until the person applies one. */
+  suggest: async (id: string, signal?: AbortSignal): Promise<DocumentSuggestions> => {
+    // A provider call can outlast the 20-second budget of ordinary note requests.
+    const response = await fetch(apiUrl(`/v1/documents/${id}/suggestions`), { method: 'POST', headers: authenticatedHeaders(),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(75000)]) : AbortSignal.timeout(75000) })
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || !payload?.success) throw new Error(payload?.error || `Suggestions failed (HTTP ${response.status}).`)
+    return payload.data as DocumentSuggestions
+  },
   exportStatus: (signal?: AbortSignal) => request<ExportStatus>('/exports/markdown', 'GET', undefined, signal),
   exportMarkdown: (data: { dryRun: boolean; overwrite?: string[] }) => request<ExportResult>('/exports/markdown', 'POST', data.dryRun ? data : { ...data, confirm: true }),
   source: (id: string, signal?: AbortSignal) => request<DocumentSource>(`/documents/${id}/source`, 'GET', undefined, signal),

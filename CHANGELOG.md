@@ -1,11 +1,55 @@
 # Changelog
 
-## Unreleased - 0.7.0 Sprint 2
+## 1.0.0 - 2026-10-15
+
+OpenPlod 1.0 is the first stable release: a local-first recording vault with transcription you can
+steer, a guided first run, and the knowledge workspace built during 0.7.0. It ships with the
+documented support boundaries below, decided explicitly instead of waiting on every roadmap gate
+([scope decision](ROADMAP.md#100-scope-decision)).
+
+### Added
+
+- **Transcription profiles.** A profile is a named context prompt plus vocabulary, with an optional
+  provider, model, language, and speaker-label choice: "Medical consultation", "Engineering
+  standup", "Réunion (français)", and five other presets to start from, or your own. Choose a
+  default in Settings > AI providers, or pick one per recording in the Transcribe dialog, where you
+  can also add a one-off context for that recording. Profiles are hints sent with the audio; they
+  never rewrite a transcript.
+  - **Prompts reach the models that take them:** OpenAI (`whisper-1`, `gpt-4o-transcribe`,
+    `gpt-4o-mini-transcribe`) receives the prompt and vocabulary; whisper.cpp receives them as its
+    `--prompt`; Deepgram now receives vocabulary as `keywords` (Nova-2) or `keyterm` (Nova-3, newly
+    selectable); AssemblyAI keeps `word_boost`. Mistral Voxtral takes neither.
+  - **No silent drops.** A profile written for any provider leaves out the hints the chosen provider
+    cannot take, and the transcript's provenance lists them (`ignoredProfileHints`). A prompt or
+    vocabulary set directly on a job for a provider that cannot take it is still refused with `400`.
+    The settings and dialogs show what will be ignored before anything runs.
+  - New endpoints: `/api/v1/transcription-profiles` (CRUD and presets). New AI settings fields:
+    `transcriptionPrompt` and `transcriptionProfile`. New capability flag: `prompt`.
+- **First-run setup guide.** Five steps: welcome, local-only or chosen providers, a transcription
+  model with its key and a connection check, a profile preset, and where to bring recordings in
+  from (Plaud, files, microphone, Android, or documents). It is skippable, works at phone width, and
+  can be run again from Settings or the command palette. New endpoints: `GET /api/onboarding`,
+  `POST /api/onboarding/complete`, `POST /api/onboarding/reset`.
+- **Command palette.** ⌘K / Ctrl+K now lists quick actions (go to any workspace, import, record,
+  Plaud, Android, transcription profiles, API and MCP, run the setup guide) alongside search
+  results, with arrow-key navigation.
+- **KB-05 AI title and tag suggestions** for documents. "Suggest" in a note's tag row asks the
+  summaries provider for a title and up to five new tags; each one is applied only when you click
+  it, as an ordinary revision-checked edit. Long notes send their first 24,000 characters and say
+  so. New endpoint: `POST /api/v1/documents/:id/suggestions`.
+- **MCP:** read-only `list_transcription_profiles`.
+
+### Fixed
+
+- Deepgram speaker labels were requested with an undocumented parameter (`diarize_model`); the
+  adapter now sends `diarize=true`.
+
+### Knowledge workspace: 0.7.0 Sprint 2
 
 Keeping knowledge: saved views, a managed folder export, and conversation management
 ([sprint plan and outcome](docs/sprint-0.7.0-2.md)).
 
-### Added
+#### Added
 
 - **KB-01** saved document views. Save any combination of folder, Starred or Trash, search, tag,
   and sort under a name; views list matching notes live and appear in the Documents sidebar.
@@ -21,12 +65,12 @@ Keeping knowledge: saved views, a managed folder export, and conversation manage
   A follow-up question returns an archived conversation to the main list.
 - **KB-07** read-only MCP tools `list_saved_views` and `get_markdown_export_status`.
 
-## Unreleased - 0.7.0 Sprint 1
+### Knowledge workspace: 0.7.0 Sprint 1
 
 Knowledge links and a shared job API ([sprint plan and outcome](docs/sprint-0.7.0.md)), plus fixes
 from a correctness and performance audit.
 
-### Added
+#### Added
 
 - **KB-01** document tags and schemaless properties. Tags are freeform and case-insensitive; a tag
   chip row filters Documents, and the filter composes with folders, views, and search. Properties
@@ -42,7 +86,7 @@ from a correctness and performance audit.
 - **KB-07** read-only MCP tools: `list_tags`, `get_document_source`, `list_transcript_versions`,
   `get_transcript_version`, `list_transcript_backlinks`, `list_jobs`, and `get_job`.
 
-### Fixed
+#### Fixed
 
 - Batch transcription offered, and queued, every recording in the library, including ones already
   transcribed, which could pay for a second transcription. The library list now reports
@@ -71,7 +115,7 @@ from a correctness and performance audit.
 - Document-generation progress events always named Mistral as the provider.
 - Trash retention now also runs every six hours, not only at startup.
 
-### Performance
+#### Performance
 
 - Finished processing jobs are pruned after 30 days (at most 1,000 kept) instead of accumulating in
   memory and the database forever.
@@ -81,7 +125,7 @@ from a correctness and performance audit.
   download every transcript version's full text.
 - New index for library lists, and an index for document backlinks.
 
-### Removed
+#### Removed
 
 - Unused code: the transcription barrel module and its Groq engine, the never-written speaker
   profile lookup on recording detail (the always-empty `transcript.speakerLabels` field),
@@ -90,6 +134,35 @@ from a correctness and performance audit.
   version client.
 - Tests now run against a throwaway database instead of `./data`, and the Bluetooth environment
   tests no longer depend on a locally built bridge.
+
+### Validation
+
+- 402 backend tests (`bun test`), type checking, frontend lint, build, and 33 frontend tests pass.
+  New tests cover profile storage, presets, unique names, invalid provider/model/prompt
+  combinations, profile resolution and ignored hints, deleting the default profile, the profile
+  HTTP contract, OpenAI and whisper.cpp prompt assembly, Deepgram `keywords`/`keyterm`, the
+  onboarding contract, document suggestions (normalization, Trash, malformed replies, missing key),
+  and the new MCP tool being read-only.
+- A headless-browser check against a temporary vault at 1440 px and 390 px, in dark and light
+  themes: the full setup guide, profile creation and editing, the command palette, the Transcribe
+  dialog sending the selected profile and prompt, and the suggestion error state. It found and fixed
+  two editor bugs before release. No request left the machine during the check, no console errors
+  were logged, and no page scrolled sideways.
+
+### Support boundaries
+
+These are the limits 1.0.0 ships with. They are documented, not hidden:
+
+- **No live provider was called for this release.** Profile prompts, Deepgram key terms, and
+  document suggestions are covered by contract tests against recorded request shapes, not by real
+  audio or real model output. Prompt quality depends on each provider.
+- **Plaud hardware evidence is unchanged** from 0.5.1/0.6.0: one authorized Note Pro on macOS and
+  Android, discovery and connection on Linux. Other models and firmware are unverified.
+- **No signed or notarized binaries are attached to 1.0.0.** Build from source; the last prebuilt
+  macOS ZIP is 0.5.0.
+- Not in 1.0.0: backup/restore and full purge (REL-04/05), resumable Android uploads (MOB-02),
+  hybrid retrieval (KB-04), webhook events and rules (KB-08/09), spending limits (AI-10), recording
+  collections, and export attachments. They move to 1.x; see the roadmap.
 
 ## 0.6.0 - 2026-09-21
 

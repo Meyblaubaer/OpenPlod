@@ -43,6 +43,7 @@ The MCP client accepts HTTP only for loopback hosts. Remote vault connections re
 | `list_tags` | Tags in use on active notes, with counts |
 | `list_saved_views` | Saved document views and their filters, to pass to `list_documents` |
 | `get_markdown_export_status` | Whether managed Markdown export is configured, and when it last ran |
+| `list_transcription_profiles` | Saved transcription profiles (context prompt, vocabulary, optional provider, model, language) and the built-in presets |
 | `get_document_source` | Resolve the exact transcript version a note cites: `current`, `stale`, `unknown`, or `none` |
 | `list_folders` | Read the folder hierarchy and direct document counts |
 | `list_document_versions` | Paginate history without downloading every version's content |
@@ -55,7 +56,7 @@ The MCP client accepts HTTP only for loopback hosts. Remote vault connections re
 | `list_jobs` | Processing jobs, newest first, filterable by state and recording |
 | `get_job` | One processing job: state, provider, checkpoint, error, and produced transcript version ids |
 
-The source, version, job, view, and export-status tools (0.7.0, roadmap KB-07) only read. Running a Markdown export writes to the filesystem, so it is not available through MCP, even with writes enabled. `get_job` and `list_jobs` report what the queue already knows; they never contact a transcription provider, retry, resume, or cancel anything. Unknown note, version, and job ids are errors (`Not found`), never empty results. A note whose cited transcript version no longer exists is reported as `unknown`; the current text is never substituted.
+The source, version, job, view, export-status, and profile tools (0.7.0 and 1.0.0, roadmap KB-07) only read. Profiles cannot be created or changed through MCP, and AI title/tag suggestions are not exposed because they call a provider. Running a Markdown export writes to the filesystem, so it is not available through MCP, even with writes enabled. `get_job` and `list_jobs` report what the queue already knows; they never contact a transcription provider, retry, resume, or cancel anything. Unknown note, version, and job ids are errors (`Not found`), never empty results. A note whose cited transcript version no longer exists is reported as `unknown`; the current text is never substituted.
 Resources use `openplod://documents/{id}` with `text/markdown`. Resource discovery returns up to 100 active notes; use `list_documents` for complete pagination or search.
 
 Examples of requests to your MCP-enabled assistant:

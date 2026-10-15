@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Implemented 2026-10-14; milestone exit gate not run |
+| Status | Implemented 2026-10-14; released in [1.0.0](../CHANGELOG.md#100---2026-10-15); milestone exit gate not run |
 | Window | 2026-10-13 to 2026-10-26 (two weeks) |
 | Milestone | 0.7.0 - Knowledge, Chat, and Automation |
 | Base | [0.7.0 Sprint 1](sprint-0.7.0.md) (`d42d312`) |

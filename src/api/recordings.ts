@@ -848,10 +848,13 @@ app.post('/:id/reprocess', async (c) => {
       if (Object.keys(overrides).some(key => !key.startsWith('transcription'))) throw new Error('Unsupported override');
       config = aiConfigSchema.parse({ ...readAiConfig(sqlite), ...overrides });
       const { assertPrivacy } = await import('../ai/config');
-      const { validateSpeechOptions } = await import('../ai/capabilities');
-      assertPrivacy(readAiConfig(sqlite), config.transcriptionEngine);
-      validateSpeechOptions(config.transcriptionEngine, { model: config.transcriptionModel, diarize: config.transcriptionDiarize, vocabulary: config.transcriptionVocabulary });
-    } catch { return c.json({ success: false, error: 'Invalid or privacy-blocked transcription options.' }, 400); }
+      const { validateEffective } = await import('../ai/transcription-profiles');
+      const resolved = validateEffective(sqlite, config);
+      assertPrivacy(readAiConfig(sqlite), resolved.config.transcriptionEngine);
+    } catch (error) {
+      const known = error instanceof Error && /profile|does not (support|accept)|Unsupported|Local-only/.test(error.message);
+      return c.json({ success: false, error: known ? (error as Error).message : 'Invalid or privacy-blocked transcription options.' }, 400);
+    }
     // The queue would hand back the in-flight job and drop these options; say so instead of
     // flipping a running job's status back to pending.
     if (jobQueue.activeJob('process-recording', id)) return c.json({ success: false, error: 'This recording is already being processed. Cancel that job before reprocessing.' }, 409);

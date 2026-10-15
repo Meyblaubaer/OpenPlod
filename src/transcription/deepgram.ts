@@ -39,7 +39,9 @@ export class DeepgramEngine implements TranscriptionEngine {
     const signal = AbortSignal.any([AbortSignal.timeout(180000), ...(options?.signal ? [options.signal] : [])]);
     try {
       const query = new URLSearchParams({ model: options?.model || 'nova-2', smart_format: 'true', punctuate: 'true', paragraphs: 'true', utterances: 'true' });
-      if (options?.diarize) query.set('diarize_model', 'v1');
+      if (options?.diarize) query.set('diarize', 'true');
+      // nova-3 takes key terms; nova-2 takes boosted keywords. Both are hints, never rewrites.
+      for (const term of options?.vocabulary ?? []) query.append(query.get('model') === 'nova-3' ? 'keyterm' : 'keywords', term);
       if (options?.language && options.language !== 'auto') query.set('language', options.language); else query.set('detect_language', 'true');
       signal.throwIfAborted(); options?.onCheckpoint?.({ phase: 'submitting' });
       const response = await fetch(`https://api.deepgram.com/v1/listen?${query}`, { method: 'POST', redirect: 'error', headers: { Authorization: `Token ${this.apiKey}`, 'Content-Type': mimetype }, body: new Uint8Array(buffer), signal });

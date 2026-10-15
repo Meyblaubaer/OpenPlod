@@ -12,6 +12,11 @@ const run = promisify(execFile);
 const binary = process.env.WHISPER_BIN || '/opt/homebrew/bin/whisper-cli';
 const models = process.env.WHISPER_MODELS_DIR || join(homedir(), 'clawd/models/whisper');
 const resultSchema = z.object({ transcription: z.array(z.object({ text: z.string(), offsets: z.object({ from: z.number().nonnegative(), to: z.number().nonnegative() }) })) });
+/** whisper.cpp takes one initial prompt; vocabulary is appended to it so names are spelled as given. */
+export function whisperPrompt(options: TranscriptionOptions): string[] {
+  const prompt = [options.prompt?.trim(), options.vocabulary?.length ? `Glossary: ${options.vocabulary.join(', ')}.` : ''].filter(Boolean).join(' ');
+  return prompt ? ['--prompt', prompt] : [];
+}
 export class WhisperEngine implements TranscriptionEngine {
   readonly name = 'whisper.cpp';
   isAvailable() { return existsSync(binary); }
@@ -29,7 +34,7 @@ export class WhisperEngine implements TranscriptionEngine {
       try { await run('ffmpeg', ['-y', '-i', path, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', wav], { signal, timeout: 120000 }); }
       catch { signal.throwIfAborted(); await run('afconvert', ['-f', 'WAVE', '-d', 'LEI16@16000', '-c', '1', path, wav], { signal, timeout: 120000 }); }
       options.onCheckpoint?.({ phase: 'transcribing' });
-      await run(binary, ['-m', modelPath, '-f', wav, '-t', String(Math.max(1, Math.min(16, options.threads || 4))), '-oj', '-of', output, '--no-prints', '-l', options.language || 'auto'], { signal, timeout: 600000 });
+      await run(binary, ['-m', modelPath, '-f', wav, '-t', String(Math.max(1, Math.min(16, options.threads || 4))), '-oj', '-of', output, '--no-prints', '-l', options.language || 'auto', ...whisperPrompt(options)], { signal, timeout: 600000 });
       const parsed = resultSchema.parse(JSON.parse(await readFile(`${output}.json`, 'utf8')));
       signal.throwIfAborted();
       if (parsed.transcription.some(item => item.offsets.to < item.offsets.from)) throw new Error('Invalid offsets');

@@ -1,6 +1,6 @@
-# AI Providers: 0.5.0 Implementation Status
+# AI Providers
 
-Version 0.5.0 is an experimental prerelease, not a production-accepted milestone. No new live-provider success is claimed. The public package is macOS Apple Silicon only; the Android debug build remains a local development artifact.
+This page started as the 0.5.0 implementation status and is kept current through 1.0.0. No live-provider success is claimed for any release: adapters are contract-tested against recorded request and response shapes. The public package is macOS Apple Silicon only; the Android debug build remains a local development artifact.
 
 ## Setup
 
@@ -18,6 +18,32 @@ Whisper.cpp needs `WHISPER_BIN` (default `/opt/homebrew/bin/whisper-cli`) and a 
 
 Existing Mistral key settings are preserved. Historical documents retain their recorded provider. The old summary-only `LLM_API_KEY`, `LLM_BASE_URL`, and `LLM_MODEL` variables are no longer used; select a supported analysis provider explicitly. Arbitrary custom endpoints are deferred.
 
+## Prompts, Vocabulary, and Profiles (1.0.0)
+
+Speech models transcribe better when they know what they are hearing. OpenPlod sends that context
+only to providers whose API accepts it, through the field each one documents:
+
+| Provider | Context prompt | Vocabulary | Request field |
+| --- | --- | --- | --- |
+| OpenAI | Yes | Yes | `prompt`: the context, then the vocabulary as a comma-separated line |
+| Whisper.cpp | Yes | Yes | `--prompt`: the context, then `Glossary: …` |
+| Deepgram | No | Yes | `keywords` on Nova-2, `keyterm` on Nova-3 (one parameter per term) |
+| AssemblyAI | No | Yes | `word_boost` |
+| Mistral Voxtral | No | No | — |
+
+Write the prompt as a description of the recording ("A weekly product review between the design
+and engineering leads; it mentions Voxtral and OpenPlod"), not as instructions: speech models use it
+to bias spelling and style, and a prompt in another language than the audio can push the
+transcript toward that language. OpenAI's own guidance limits how much of a long prompt
+`whisper-1` considers; OpenPlod caps profile prompts at 1,000 characters.
+
+A **transcription profile** stores a prompt, vocabulary, and optionally a provider, model,
+language, and speaker-label choice. Settings > Transcription profiles creates them from eight
+presets or from scratch; Settings > AI providers picks the default; the Transcribe dialog picks one
+per recording and adds a one-off context. Resolution and refusal rules are in the
+[API reference](api.md#transcription-profiles). The capability registry exposes the new `prompt`
+flag next to `vocabulary` and `diarization`.
+
 ## Privacy and Recovery
 
 - Default fallback is empty. A saved fallback list is an explicit additional audio destination. Per-recording dialog requests use no fallback.
@@ -34,7 +60,8 @@ Existing Mistral key settings are preserved. Historical documents retain their r
 - `PUT /api/ai-settings`: atomically save validated configuration and optional credentials.
 - `POST /api/ai-settings/check/:provider`: metadata-only connection check using saved credentials.
 - `GET /api/ai-settings/ollama-models`: local installed-model inventory, excluding remote models.
-- `POST /api/recordings/:id/reprocess`: optional transcription configuration overrides for this job; empty body keeps saved defaults.
+- `POST /api/recordings/:id/reprocess`: optional transcription configuration overrides for this job (including `transcriptionPrompt` and `transcriptionProfile`); empty body keeps saved defaults.
+- `/api/v1/transcription-profiles`: profile CRUD and presets; see the [API reference](api.md#transcription-profiles).
 - `GET /api/jobs`: redacted status, provider, recording ID, phase and remote job ID.
 - `POST /api/jobs/:id/cancel`: stop queued/running local work.
 - `POST /api/jobs/:id/resume`: resume a failed/cancelled known remote job after the old handler stops.

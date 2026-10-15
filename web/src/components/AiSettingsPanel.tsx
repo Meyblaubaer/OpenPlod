@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { aiSettingsApi, type AiSettings, type AiConfig, type SpeechProvider, type TextProvider, type ProcessingJob } from '@/lib/ai-settings'
+import { aiSettingsApi, profilesApi, type AiSettings, type AiConfig, type SpeechProvider, type TextProvider, type ProcessingJob, type TranscriptionProfile } from '@/lib/ai-settings'
+import { LANGUAGES, PROMPT_LIMIT } from '@/lib/transcription'
+import { PROFILES_CHANGED } from '@/components/TranscriptionProfilesPanel'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Save, RefreshCw, X, Loader2 } from '@/components/icons'
@@ -15,6 +17,12 @@ export function AiSettingsPanel() {
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false)
   const [models, setModels] = useState<string[]>([]), [jobs, setJobs] = useState<ProcessingJob[]>([])
   useEffect(() => { let active = true; aiSettingsApi.get().then(value => { if (active) { setSettings(value); setVocabulary(value.transcriptionVocabulary.join(', ')) } }).catch(e => { if (active) setError(e.message) }); return () => { active = false } }, [])
+  const [profiles, setProfiles] = useState<TranscriptionProfile[]>([])
+  useEffect(() => {
+    const load = () => { profilesApi.list().then(value => setProfiles(value.profiles)).catch(() => setProfiles([])) }
+    load(); window.addEventListener(PROFILES_CHANGED, load)
+    return () => window.removeEventListener(PROFILES_CHANGED, load)
+  }, [])
   const update = (patch: Partial<AiConfig>) => { setNotice(''); if (patch.transcriptionVocabulary) setVocabulary(patch.transcriptionVocabulary.join(', ')); setSettings(value => value ? { ...value, ...patch } : value) }
   const action = async (run: () => Promise<void>) => { setBusy(true); setError(''); setNotice(''); try { await run() } catch (e) { setError(e instanceof Error ? e.message : 'AI settings unavailable.') } finally { setBusy(false) } }
   const save = () => action(async () => {
@@ -31,11 +39,13 @@ export function AiSettingsPanel() {
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}{notice && <p role="status" className="text-sm">{notice}</p>}
     <label className="grid gap-2 text-sm">Processing privacy<select className={selectClass} disabled={busy} value={settings.privacyMode} onChange={e => update(e.target.value === 'local-only' ? { privacyMode: 'local-only', transcriptionEngine: 'whisper', transcriptionModel: '', transcriptionDiarize: false, transcriptionVocabulary: [], transcriptionFallback: [], analysisProvider: 'ollama', analysisModel: '', documentProvider: 'ollama', documentModel: '', chatProvider: 'ollama', chatModel: '' } : { privacyMode: 'selected-providers' })}><option value="selected-providers">Selected providers</option><option value="local-only">Local only</option></select></label>
     <fieldset disabled={busy} className="grid min-w-0 gap-4 sm:grid-cols-2"><legend className="mb-3 text-sm font-semibold">Transcription</legend>
-      <label className="grid gap-2 text-sm">Provider<select className={selectClass} value={settings.transcriptionEngine} onChange={e => update({ transcriptionEngine: e.target.value as SpeechProvider, transcriptionModel: '', transcriptionDiarize: false, transcriptionVocabulary: [], transcriptionFallback: [] })}>{speech.map(provider => <option key={provider} disabled={local && provider !== 'whisper'} value={provider}>{labels[provider]}</option>)}</select></label>
+      <label className="grid gap-2 text-sm">Provider<select className={selectClass} value={settings.transcriptionEngine} onChange={e => update({ transcriptionEngine: e.target.value as SpeechProvider, transcriptionModel: '', transcriptionDiarize: false, transcriptionVocabulary: [], transcriptionFallback: [], ...(settings.capabilities[e.target.value as SpeechProvider].prompt ? {} : { transcriptionPrompt: '' }) })}>{speech.map(provider => <option key={provider} disabled={local && provider !== 'whisper'} value={provider}>{labels[provider]}</option>)}</select></label>
       <label className="grid gap-2 text-sm">Model<select className={selectClass} value={settings.transcriptionModel} onChange={e => update({ transcriptionModel: e.target.value })}><option value="">{capability.models[0]} (default)</option>{capability.models.map(model => <option key={model}>{model}</option>)}</select></label>
-      <label className="grid gap-2 text-sm">Language<select className={selectClass} value={settings.transcriptionLanguage} onChange={e => update({ transcriptionLanguage: e.target.value })}>{[['auto', 'Detect automatically'], ['en', 'English'], ['fr', 'French'], ['de', 'German'], ['es', 'Spanish'], ['it', 'Italian'], ['pt', 'Portuguese'], ['ja', 'Japanese'], ['zh', 'Chinese']].map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></label>
+      <label className="grid gap-2 text-sm">Language<select className={selectClass} value={settings.transcriptionLanguage} onChange={e => update({ transcriptionLanguage: e.target.value })}>{LANGUAGES.map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></label>
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={!capability.diarization} checked={settings.transcriptionDiarize} onChange={e => update({ transcriptionDiarize: e.target.checked })} />Speaker labels</label>
       <label className="grid gap-2 text-sm sm:col-span-2">Vocabulary hints<Input disabled={!capability.vocabulary} value={vocabulary} onChange={e => { setVocabulary(e.target.value); setNotice('') }} /></label>
+      <label className="grid gap-2 text-sm sm:col-span-2">Default profile<select className={selectClass} value={settings.transcriptionProfile} onChange={e => update({ transcriptionProfile: e.target.value })}><option value="">None</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}{settings.transcriptionProfile && !profiles.some(profile => profile.id === settings.transcriptionProfile) && <option value={settings.transcriptionProfile}>Missing profile</option>}</select></label>
+      <label className="grid gap-2 text-sm sm:col-span-2">Context prompt<textarea className="min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm" disabled={!capability.prompt} maxLength={PROMPT_LIMIT} rows={3} value={capability.prompt ? settings.transcriptionPrompt : ''} placeholder={capability.prompt ? 'Describe your usual recordings: who speaks, the topic, names to spell.' : `${capability.label} does not accept a context prompt.`} onChange={e => update({ transcriptionPrompt: e.target.value })} /></label>
       <label className="grid gap-2 text-sm sm:col-span-2">Fallback provider<select className={selectClass} value={settings.transcriptionFallback[0] || ''} onChange={e => update({ transcriptionFallback: e.target.value ? [e.target.value as SpeechProvider] : [] })}><option value="">None</option>{speech.filter(provider => provider !== settings.transcriptionEngine).map(provider => <option key={provider} disabled={local && provider !== 'whisper'} value={provider}>{labels[provider]}</option>)}</select></label>
     </fieldset>
     <fieldset disabled={busy} className="space-y-4 border-t pt-4"><legend className="text-sm font-semibold">Text AI</legend>{(['analysis', 'document', 'chat'] as const).map(task => <div key={task} className="grid gap-3 sm:grid-cols-2">

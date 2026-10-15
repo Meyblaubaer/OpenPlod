@@ -1,17 +1,42 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as Dialog from "@radix-ui/react-dialog";
-import { FileAudio, FileText, Loader2, Search, X } from "@/components/icons";
+import { ArrowRight, AudioLines, Bluetooth, FileAudio, FileText, FolderHeart, Home, Loader2, MessageSquare, Mic, NotebookPen, Rocket, Search, Settings, Smartphone, Upload, Workflow, X } from "@/components/icons";
+import { ONBOARDING_EVENT } from "@/lib/ai-settings";
 import { api } from "@/lib/api";
 import { apiUrl, authenticatedHeaders } from "@/lib/runtime";
 
 type Result = { id: string; title: string; kind: string; to: string };
+type Action = { id: string; label: string; hint: string; icon: typeof Home; to?: string; event?: string; keywords: string };
+/** Quick actions shown before and alongside search results. */
+const ACTIONS: Action[] = [
+  { id: "home", label: "Home", hint: "Go to", icon: Home, to: "/", keywords: "dashboard start" },
+  { id: "recordings", label: "Recordings", hint: "Go to", icon: FolderHeart, to: "/recordings", keywords: "library audio" },
+  { id: "transcripts", label: "Transcripts", hint: "Go to", icon: FileText, to: "/transcripts", keywords: "text studio" },
+  { id: "documents", label: "Documents", hint: "Go to", icon: NotebookPen, to: "/notes", keywords: "notes markdown obsidian" },
+  { id: "chat", label: "AI Chat", hint: "Go to", icon: MessageSquare, to: "/ai", keywords: "ask question conversation" },
+  { id: "import", label: "Import audio files", hint: "Action", icon: Upload, to: "/import", keywords: "upload mp3 m4a wav" },
+  { id: "record", label: "Record with the microphone", hint: "Action", icon: Mic, to: "/record", keywords: "capture new recording" },
+  { id: "plaud", label: "Plaud device", hint: "Action", icon: Bluetooth, to: "/devices", keywords: "bluetooth sync note pro" },
+  { id: "android", label: "Pair an Android phone", hint: "Action", icon: Smartphone, to: "/android", keywords: "mobile qr" },
+  { id: "profiles", label: "Transcription profiles", hint: "Settings", icon: AudioLines, to: "/settings#profiles", keywords: "prompt vocabulary model whisper voxtral" },
+  { id: "settings", label: "Settings", hint: "Go to", icon: Settings, to: "/settings", keywords: "ai providers keys privacy" },
+  { id: "developer", label: "API and MCP", hint: "Go to", icon: Workflow, to: "/developer", keywords: "developer token claude" },
+  { id: "setup", label: "Run the setup guide", hint: "Action", icon: Rocket, event: ONBOARDING_EVENT, keywords: "onboarding welcome start" },
+];
+type Item = { kind: "action"; key: string; action: Action } | { kind: "result"; key: string; row: Result };
+const matches = (action: Action, query: string) => {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const haystack = `${action.label} ${action.keywords}`.toLowerCase();
+  return words.every((word) => haystack.includes(word));
+};
 export function WorkspaceSearch() {
   const [open, setOpen] = useState(false),
     [query, setQuery] = useState(""),
     [rows, setRows] = useState<Result[]>([]);
   const [loading, setLoading] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [active, setActive] = useState(0);
   const navigate = useNavigate();
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
@@ -83,11 +108,24 @@ export function WorkspaceSearch() {
       abort.abort();
     };
   }, [query, open]);
+  const term = query.trim();
+  const actions = (term ? ACTIONS.filter((action) => matches(action, term)).slice(0, 5) : ACTIONS);
+  const visible: Item[] = [
+    ...actions.map((action) => ({ kind: "action" as const, key: `action-${action.id}`, action })),
+    ...(term.length >= 2 ? rows.map((row) => ({ kind: "result" as const, key: `${row.kind}-${row.id}`, row })) : []),
+  ];
+  const choose = (item: Item) => {
+    setOpen(false);
+    if (item.kind === "result") navigate(item.row.to);
+    else if (item.action.event) window.dispatchEvent(new Event(item.action.event));
+    else if (item.action.to) navigate(item.action.to);
+  };
   return (
     <Dialog.Root
       open={open}
       onOpenChange={(value) => {
         setOpen(value);
+        setActive(0);
         setLoading(false);
         setError("");
       }}
@@ -106,9 +144,19 @@ export function WorkspaceSearch() {
             <input
               autoFocus
               aria-label="Search workspace"
-              placeholder="Search recordings, transcripts, documents..."
+              placeholder="Search, or type a command…"
               value={query}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                  event.preventDefault();
+                  if (visible.length) setActive((index) => (index + (event.key === "ArrowDown" ? 1 : -1) + visible.length) % visible.length);
+                } else if (event.key === "Enter" && visible[active]) {
+                  event.preventDefault();
+                  choose(visible[active]);
+                }
+              }}
               onChange={(e) => {
+                setActive(0);
                 setQuery(e.target.value);
                 setRows([]);
                 setError("");
@@ -119,29 +167,33 @@ export function WorkspaceSearch() {
               <X />
             </Dialog.Close>
           </div>
-          <div className="command-results">
+          <div className="command-results" role="listbox" aria-label="Commands and results">
+            {visible.map((item, index) => {
+              const Icon = item.kind === "action" ? item.action.icon : item.row.kind === "Recording" ? FileAudio : FileText;
+              const title = item.kind === "action" ? item.action.label : item.row.title;
+              const kind = item.kind === "action" ? item.action.hint : item.row.kind;
+              return (
+                <button
+                  key={item.key}
+                  role="option"
+                  aria-selected={index === active}
+                  data-active={index === active || undefined}
+                  onMouseMove={() => setActive(index)}
+                  onClick={() => choose(item)}
+                >
+                  <Icon />
+                  <span>
+                    {title}
+                    <small>{kind}</small>
+                  </span>
+                  {item.kind === "action" && <ArrowRight className="command-go" />}
+                </button>
+              );
+            })}
             {loading && <Loader2 className="animate-spin" />}
             {error && <p role="alert">{error}</p>}
-            {query.trim().length < 2 ? (
-              <p>Search your workspace</p>
-            ) : !loading && !rows.length && !error ? (
+            {query.trim().length >= 2 && !loading && !rows.length && !error && !visible.length && (
               <p>No results found.</p>
-            ) : (
-              rows.map((row) => (
-                <button
-                  key={`${row.kind}-${row.id}`}
-                  onClick={() => {
-                    setOpen(false);
-                    navigate(row.to);
-                  }}
-                >
-                  {row.kind === "Recording" ? <FileAudio /> : <FileText />}
-                  <span>
-                    {row.title}
-                    <small>{row.kind}</small>
-                  </span>
-                </button>
-              ))
             )}
           </div>
         </Dialog.Content>

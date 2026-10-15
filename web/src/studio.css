@@ -1023,8 +1023,21 @@
   align-items: center;
   font-size: 13px;
 }
-.command-results > button:hover {
+.command-results > button:hover,
+.command-results > button[data-active] {
   background: var(--accent);
+}
+.command-results > button span {
+  flex: 1;
+  min-width: 0;
+}
+.command-results > button svg.command-go {
+  width: 14px;
+  opacity: 0;
+  color: var(--muted-foreground);
+}
+.command-results > button[data-active] svg.command-go {
+  opacity: 1;
 }
 .command-results > button svg {
   width: 18px;

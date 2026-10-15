@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { FileText, Link2, Plus, Tag, X } from '@/components/icons'
-import { notesApi, type DocumentSource, type NoteDocument, type NoteProperties, type NoteSummary } from '@/lib/notes-api'
+import { Check, FileText, Link2, Loader2, Plus, Sparkles, Tag, X } from '@/components/icons'
+import { notesApi, type DocumentSource, type DocumentSuggestions, type NoteDocument, type NoteProperties, type NoteSummary } from '@/lib/notes-api'
 
 /**
  * Knowledge links for one document (roadmap KB-01): freeform tags, schemaless
@@ -13,7 +13,7 @@ import { notesApi, type DocumentSource, type NoteDocument, type NoteProperties, 
 export function NoteMetadata({ document, disabled, onUpdate, onOpenDocument }: {
   document: NoteDocument
   disabled: boolean
-  onUpdate: (data: { tags?: string[]; properties?: NoteProperties }) => void
+  onUpdate: (data: { title?: string; tags?: string[]; properties?: NoteProperties }) => void
   onOpenDocument: (id: string) => void
 }) {
   const [tagDraft, setTagDraft] = useState('')
@@ -25,6 +25,19 @@ export function NoteMetadata({ document, disabled, onUpdate, onOpenDocument }: {
     if (next.length) onUpdate({ tags: [...document.tags, ...next] })
   }
   const propertyCount = Object.keys(document.properties).length
+  const [suggestions, setSuggestions] = useState<DocumentSuggestions | null>(null)
+  const [suggesting, setSuggesting] = useState(false), [suggestError, setSuggestError] = useState('')
+  // Suggestions describe one revision; a newer save or another note makes them stale.
+  useEffect(() => { setSuggestions(null); setSuggestError('') }, [document.id])
+  const live = suggestions && suggestions.documentId === document.id ? suggestions : null
+  const pendingTags = live?.tags.filter(tag => !document.tags.some(existing => existing.toLocaleLowerCase() === tag)) ?? []
+  const pendingTitle = live?.title && live.title !== document.title ? live.title : null
+  const suggest = async () => {
+    setSuggesting(true); setSuggestError('')
+    try { setSuggestions(await notesApi.suggest(document.id)) }
+    catch (error) { setSuggestError(error instanceof Error ? error.message : 'Suggestions are unavailable.') }
+    finally { setSuggesting(false) }
+  }
   return <div className="notes-metadata">
     <div className="notes-tags" aria-label="Tags">
       <Tag />
@@ -35,7 +48,20 @@ export function NoteMetadata({ document, disabled, onUpdate, onOpenDocument }: {
         onChange={event => { if (event.target.value.endsWith(',')) addTags(event.target.value); else setTagDraft(event.target.value) }}
         onKeyDown={event => { if (event.key === 'Enter' && tagDraft.trim()) { event.preventDefault(); addTags(tagDraft) } }}
         onBlur={() => { if (tagDraft.trim()) addTags(tagDraft) }} />
+      <button type="button" className="notes-suggest" disabled={disabled || suggesting} title="Suggest a title and tags with AI. Nothing changes until you apply one." onClick={() => void suggest()}>
+        {suggesting ? <Loader2 className="animate-spin" /> : <Sparkles />}<span>Suggest</span>
+      </button>
     </div>
+    {suggestError && <p className="notes-suggestions-error" role="alert">{suggestError}</p>}
+    {live && <div className="notes-suggestions" role="group" aria-label="AI suggestions">
+      {!pendingTitle && !pendingTags.length ? <span className="notes-suggestions-empty">No new suggestions{live.truncated ? ' (only the beginning of this long note was read)' : ''}.</span> : <>
+        {pendingTitle && <button type="button" disabled={disabled} title="Use this title" onClick={() => onUpdate({ title: pendingTitle })}><Check /><span>Title: {pendingTitle}</span></button>}
+        {pendingTags.map(tag => <button key={tag} type="button" disabled={disabled} title={`Add tag ${tag}`} onClick={() => onUpdate({ tags: [...document.tags, tag] })}><Plus /><span>{tag}</span></button>)}
+        {pendingTags.length > 1 && <button type="button" className="notes-suggestions-all" disabled={disabled} onClick={() => onUpdate({ tags: [...document.tags, ...pendingTags] })}>Add all tags</button>}
+      </>}
+      <small>{live.provider} · {live.model}</small>
+      <button type="button" className="notes-suggestions-close" aria-label="Dismiss suggestions" title="Dismiss" onClick={() => setSuggestions(null)}><X /></button>
+    </div>}
     <details className="notes-links">
       <summary><Link2 />Properties and source<small>{propertyCount ? `${propertyCount} propert${propertyCount === 1 ? 'y' : 'ies'}` : ''}</small></summary>
       <div className="notes-links-body">

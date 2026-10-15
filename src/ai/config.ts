@@ -15,6 +15,10 @@ export const aiConfigSchema = z.object({
   transcriptionDiarize: z.boolean().default(false),
   transcriptionVocabulary: z.array(z.string().trim().min(1).max(80)).max(100).default([]),
   transcriptionFallback: z.array(z.enum(speechProviders)).max(4).default([]),
+  /** One-off context prompt for providers that accept one (see capabilities.prompt). */
+  transcriptionPrompt: z.string().trim().max(2000).default(''),
+  /** Default transcription profile id, or '' for none. */
+  transcriptionProfile: z.string().regex(/^[a-zA-Z0-9-]{0,64}$/).default(''),
   analysisProvider: z.enum(textProviders).default('mistral'), analysisModel: model.default(''),
   documentProvider: z.enum(textProviders).default('mistral'), documentModel: model.default(''),
   chatProvider: z.enum(textProviders).default('mistral'), chatModel: model.default(''),

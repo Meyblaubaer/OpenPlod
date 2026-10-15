@@ -52,6 +52,8 @@ export const UserRound = glyph('User', <><circle {...tone} cx="12" cy="7.5" r="4
 export const Bell = glyph('Notifications', <><path {...tone} d="M5 10a7 7 0 0 1 14 0v6l2 2H3l2-2z" /><path d="M5 10a7 7 0 0 1 14 0v6l2 2H3l2-2zM9 21h6M12 1v2" /></>)
 export const Sun = glyph('LightTheme', <><circle {...tone} cx="12" cy="12" r="4.5" /><circle cx="12" cy="12" r="4.5" /><path d="M12 1v2m0 18v2M1 12h2m18 0h2M4 4l1.5 1.5m13 13L20 20M4 20l1.5-1.5m13-13L20 4" /></>)
 export const Moon = glyph('DarkTheme', <><path {...tone} d="M17 3a9.5 9.5 0 1 0 4 13A8 8 0 0 1 17 3Z" /><path d="M17 3a9.5 9.5 0 1 0 4 13A8 8 0 0 1 17 3Z" /></>)
+export const Rocket = glyph('GetStarted', <><path {...tone} d="M14 4c3-1.5 5.5-1.5 6-1-.5 3-2 6-5 9l-5 3-3-3 3-5z" /><path d="M14 4c3-1.5 5.5-1.5 6 0 1.5.5 1.5 3-.5 6-1.5 2-3.5 3.5-5.5 5l-3.5 2-3.5-3.5 2-3.5C10.5 8 12 5.5 14 4zM9 9.5H5L3 12l4 1m4.5 4 1 4 2.5-2v-4M5 16c-1.5 1-2 3-2 5 2 0 4-.5 5-2" /><circle cx="15.5" cy="8.5" r="1.5" /></>)
+export const Lock = glyph('LocalOnly', <><rect {...tone} x="4" y="10" width="16" height="11" rx="2" /><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 4.5v2.5" /></>)
 export const ShieldCheck = glyph('VerifiedAccess', <><path {...tone} d="m12 2 9 4v6c0 5-5 8-9 10-4-2-9-5-9-10V6z" /><path d="m12 2 9 4v6c0 5-5 8-9 10-4-2-9-5-9-10V6zM8 12l3 3 5-6" /></>)
 export const KeyRound = glyph('Authorization', <><circle {...tone} cx="8" cy="8" r="5" /><circle cx="8" cy="8" r="5" /><path d="m11.5 11.5 9 9m-3-3 3-3m-6 .5 3-3M6.5 6.5h.01" /></>)
 export const Radio = glyph('DeviceDiscovery', <><circle {...tone} cx="12" cy="12" r="3" /><circle cx="12" cy="12" r="2" /><path d="M7 7a7 7 0 0 0 0 10m10-10a7 7 0 0 1 0 10M4 4a11 11 0 0 0 0 16M20 4a11 11 0 0 1 0 16" /></>)
@@ -86,6 +88,7 @@ export const Undo2 = glyph('Undo', <path d="m8 3-6 6 6 6M2 9h12a7 7 0 0 1 0 14" 
 export const Redo2 = glyph('Redo', <path d="m16 3 6 6-6 6m6-6H10a7 7 0 0 0 0 14" />)
 export const Download = glyph('Download', <><path {...tone} d="M3 16h18v5H3z" /><path d="M12 2v13m-5-5 5 5 5-5M3 16v5h18v-5" /></>)
 export const Upload = glyph('Import', <><path {...tone} d="M3 16h18v5H3z" /><path d="M12 15V2m-5 5 5-5 5 5M3 16v5h18v-5" /></>)
+export const Cloud = glyph('CloudProviders', <><path {...tone} d="M6.5 19h11a4.5 4.5 0 0 0 .9-8.9A6 6 0 0 0 7 9.2 5 5 0 0 0 6.5 19z" /><path d="M6.5 19h11a4.5 4.5 0 0 0 .9-8.9A6 6 0 0 0 7 9.2 5 5 0 0 0 6.5 19z" /></>)
 export const CloudUpload = glyph('CloudUpload', <>{cloud}<path d="M12 22V12m-4 4 4-4 4 4" /></>)
 export const UploadCloud = CloudUpload
 export const Send = glyph('Send', <><path {...tone} d="M2 4 22 2l-2 20-8-10z" /><path d="M2 4 22 2l-2 20-8-10zM12 12 22 2M5 14l-2 7 7-2" /></>)

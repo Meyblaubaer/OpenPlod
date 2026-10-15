@@ -46,6 +46,8 @@ export interface TranscriptionOptions {
   /** Number of threads for local processing */
   threads?: number;
   vocabulary?: string[];
+  /** Context prompt describing the recording, for providers that accept one. */
+  prompt?: string;
   signal?: AbortSignal;
   checkpoint?: { phase: string; remoteId?: string };
   onCheckpoint?: (checkpoint: { phase: string; remoteId?: string }) => void;

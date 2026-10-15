@@ -43,6 +43,8 @@ export function createMcpServer(client: VaultClient, allowWrites = false) {
     () => result(() => client.request('/api/v1/views')));
   server.registerTool('get_markdown_export_status', { description: 'Report whether managed Markdown export to a folder is configured, and when it last ran. Running an export is not available through MCP.', inputSchema: {}, annotations: read },
     () => result(() => client.request('/api/v1/exports/markdown')));
+  server.registerTool('list_transcription_profiles', { description: 'List saved transcription profiles (context prompt, vocabulary, and optional provider, model, and language) and the built-in presets they can be created from. Reading them never contacts a provider.', inputSchema: {}, annotations: read },
+    () => result(() => client.request('/api/v1/transcription-profiles')));
   server.registerTool('get_document_source', { description: 'Resolve the exact transcript version a note was written from. status is current, stale (a newer version is current), unknown (the cited version cannot be found; no substitute text is returned), or none.', inputSchema: { id: identifier }, annotations: read },
     ({ id }) => result(() => client.request(`/api/v1/documents/${id}/source`)));
   server.registerTool('list_transcript_versions', { description: 'List saved transcript versions for a recording, newest first, with provider, current flag, and how many active notes cite each. Text is not included.', inputSchema: { recordingId: identifier }, annotations: read },

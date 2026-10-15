@@ -2,7 +2,8 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { Database } from 'bun:sqlite';
 import { aiSettingsInput, readAiConfig, credential, secretNames, assertPrivacy, textProviders } from '../ai/config';
-import { speechCapabilities, validateSpeechOptions } from '../ai/capabilities';
+import { speechCapabilities } from '../ai/capabilities';
+import { validateEffective } from '../ai/transcription-profiles';
 import { installedOllamaModels } from '../ai/text';
 
 export function createAiSettingsApi(database: Database) {
@@ -16,7 +17,7 @@ export function createAiSettingsApi(database: Database) {
       assertPrivacy(config, config.transcriptionEngine);
       for (const provider of config.transcriptionFallback) assertPrivacy(config, provider);
       for (const task of ['analysis', 'document', 'chat'] as const) assertPrivacy(config, config[`${task}Provider`]);
-      validateSpeechOptions(config.transcriptionEngine, { model: config.transcriptionModel, diarize: config.transcriptionDiarize, vocabulary: config.transcriptionVocabulary });
+      assertPrivacy(config, validateEffective(database, config).config.transcriptionEngine);
     } catch (error) { return c.json({ success: false, error: (error as Error).message }, 400); }
     database.transaction(() => {
       const put = database.query("INSERT INTO user_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=datetime('now')");

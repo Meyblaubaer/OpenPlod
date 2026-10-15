@@ -1,6 +1,6 @@
 # OpenPlod 1.0.0 Roadmap
 
-Updated September 8, 2026. Original baseline: experimental **0.4.1**; latest experimental prerelease: **0.5.0**.
+Updated October 15, 2026: **1.0.0 is released** under the [scope decision](#100-scope-decision) below. Earlier update: September 8, 2026. Original baseline: experimental **0.4.1**.
 
 September 8 implementation update: **0.5.0 is an experimental prerelease**, with new speech/text adapters, shared settings, explicit privacy/fallback controls, persisted jobs, per-recording selection, and generated transcript provenance. [Detailed implementation status](docs/ai-providers.md) distinguishes code/tests from live acceptance. Checkboxes remain open until their full release gates are met; spending controls and large-file chunking are not implemented.
 
@@ -177,6 +177,30 @@ Use a separate analysis adapter contract. A provider supporting text analysis is
 - [ ] Backend tests, type checking, frontend lint/build, UI checks, native builds, Android alignment, and real 16 KB runtime acceptance.
 - [ ] Signed release artifacts, checksums, tested upgrades, published support/privacy/licensing boundaries, and a rollback procedure.
 - [ ] Release candidate completes at least seven days of documented daily-use testing with no unresolved critical/high-severity defects. Failures restart the affected acceptance checks, not just the build.
+
+## 1.0.0 Scope Decision
+
+Decided October 15, 2026, by the maintainer, as the first release gate allows ("formally removed from
+1.0 with an explicit scope decision before release").
+
+OpenPlod 1.0.0 ships the vault, the transcription and Transcript Studio workflow, the knowledge
+workspace from 0.7.0, transcription profiles, and the first-run guide. The gates above that need
+hardware, live-provider, or multi-week evidence were **not** run for 1.0.0. They are not marked
+complete, and the unchecked items move to 1.x with the boundaries stated in the
+[1.0.0 changelog](CHANGELOG.md#100---2026-10-15):
+
+| Area | 1.0.0 state | Moves to |
+| --- | --- | --- |
+| Live provider acceptance (AI-02..AI-14, TS-04..TS-10 gates) | Contract-tested; no real audio or live model output in this release | 1.1 |
+| Plaud fresh-owner onboarding and compatibility matrix (REL-01, REL-02) | One authorized Note Pro; authorization still required | 1.x |
+| Backup, restore, purge, rollback (REL-03..REL-05, REL-07) | Not implemented beyond 30-day Trash | 1.1 |
+| Android sync (MOB-01..MOB-08) | Development builds; no resumable upload | 1.2 |
+| Retrieval, webhooks, rules, connectors (KB-04, KB-08..KB-10) | Not implemented | 1.x |
+| Signed binaries, seven-day daily-use RC | Not done; build from source | 1.0.x |
+
+**1.0.0 additions beyond 0.7.0:** transcription profiles with per-model prompts and vocabulary
+(advances AI-04 and AI-06), a first-run guide (the software half of REL-01; device authorization is
+unchanged), a command palette, and reviewable AI title/tag suggestions (part of KB-05).
 
 ## Implementation Boundaries
 

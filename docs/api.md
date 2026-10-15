@@ -45,6 +45,7 @@ All paths below are relative to `/api/v1`.
 | GET | `/documents/:id` | Complete note including content, tags, properties, source references, revision, retention dates |
 | PATCH | `/documents/:id` | `{ revision, title?, content?, folderId?, starred?, tags?, properties? }` |
 | GET | `/documents/:id/source` | The exact transcript version the note cites, resolved: `current`, `stale`, `unknown`, or `none` |
+| POST | `/documents/:id/suggestions` | AI title and tag proposals; nothing is written. See [Document Suggestions](#document-suggestions) |
 | GET | `/tags` | Tags on active notes with counts, `[{ tag, count }]` |
 | GET | `/views` | Saved document views, by name; see [Saved Views](#saved-views) |
 | POST | `/views` | `{ name, filters }`; filters are the `GET /documents` filters without pagination |
@@ -58,6 +59,8 @@ All paths below are relative to `/api/v1`.
 | GET | `/jobs` | Processing jobs, newest first; see [Processing Jobs](#processing-jobs) |
 | GET | `/jobs/:id` | One job descriptor |
 | POST | `/jobs/:id/cancel` | Cancel exactly this queued or running job |
+| GET | `/transcription-profiles` | Saved profiles and built-in presets; see [Transcription Profiles](#transcription-profiles) |
+| POST/PATCH/DELETE | `/transcription-profiles[/:id]` | Create (or copy a preset), edit, delete |
 | DELETE | `/documents/:id` | `{ revision }`; move to 30-day Trash |
 | POST | `/documents/:id/restore` | `{ revision }`; restore during the retention window |
 | POST | `/documents/:id/purge` | `{ revision, confirm: true }`; permanently remove a trashed note and history |
@@ -129,6 +132,72 @@ Each note becomes `<folder path>/<title>.md`, following the note's folder tree, 
 A conflict is only resolved by naming that note in `overwrite` on a confirmed run, which replaces or recreates its file; symlinks are never followed or replaced. Run `{ "dryRun": true }` first: it reports exactly the same actions without writing anything. A real run requires `confirm: true`. Writes go through a temporary file and an atomic rename, and only one export runs at a time (`409 export_running`). An invalid manifest stops the run with `409 manifest_invalid` before anything is written; move it aside to start over. If a run fails midway, the manifest still records the files it wrote, so the next run does not treat them as foreign.
 
 Response: `{ root, dryRun, exportedAt, counts: { created, updated, moved, unchanged, conflict, orphaned }, items: [{ documentId, title, path, action, reason? }] }`. Attachments are not exported; notes reference their source recording and transcript version by id.
+
+## Document Suggestions
+
+`POST /documents/:id/suggestions` asks the configured **summaries** provider (`analysisProvider`) for a
+title and up to five tags (roadmap KB-05). Nothing is written: the response is a proposal, and
+applying it is an ordinary `PATCH /documents/:id` with the current `revision`.
+
+```json
+{ "documentId": "…", "revision": 3, "title": "OpenPlod 1.0 release plan", "tags": ["planning", "shipping"], "provider": "mistral", "model": "mistral-small-latest", "truncated": false }
+```
+
+`title` is `null` when the model offered nothing usable or repeated the current title. `tags` only
+contains lower-cased tags the note does not already carry. Only the first 24,000 characters of a
+long note are sent, and `truncated` says so. The note text is sent as untrusted data with an
+instruction to ignore any instructions inside it. Errors: `409 document_in_trash`, `400
+empty_document`, `503 provider_unavailable` (no key, or local-only mode blocks the provider), and
+`503 provider_failed` / `invalid_suggestion`. There is no automatic retry.
+
+## Transcription Profiles
+
+`/api/v1/transcription-profiles` stores named transcription hints. A profile is sent with the audio;
+it never changes transcript text.
+
+| Method | Path | Request / behavior |
+| --- | --- | --- |
+| GET | `/transcription-profiles` | `{ profiles, presets }`. Presets are built in and read-only |
+| POST | `/transcription-profiles` | A profile body, or `{ preset, name? }` to copy a preset. `201`; `409` when the name is taken (case-insensitive) |
+| GET | `/transcription-profiles/:id` | One profile; `404` when unknown |
+| PATCH | `/transcription-profiles/:id` | Any profile fields. Changing `engine` without a `model` clears the model |
+| DELETE | `/transcription-profiles/:id` | Removes it. If it was the default, `transcriptionProfile` is cleared |
+
+```json
+{ "id": "…", "name": "Medical consultation", "description": "…", "engine": null, "model": null, "language": null, "diarize": true,
+  "prompt": "A medical consultation between a clinician and a patient. …", "vocabulary": ["amoxicillin"], "createdAt": "…", "updatedAt": "…" }
+```
+
+`engine`, `model`, `language`, and `diarize` are `null` to inherit the AI settings. `prompt` is up to
+1,000 characters; `vocabulary` up to 100 terms of 80 characters. A profile with an `engine` is
+checked against that provider when saved: a model it does not offer, speaker labels it cannot
+produce, or a prompt or vocabulary it cannot take is a `400`.
+
+**How a job resolves its settings.** AI settings carry two related fields: `transcriptionPrompt`
+(a one-off context, up to 2,000 characters) and `transcriptionProfile` (the default profile id, or
+`""`). `POST /api/recordings/:id/reprocess` accepts both as overrides. When the job runs:
+
+1. A profile with an `engine` selects that provider and its `model`; otherwise the settings' provider is used.
+2. The profile's `language` and `diarize` replace the settings' values when set.
+3. Vocabularies are merged (settings first, duplicates removed). The prompt is the job's prompt, then the profile's.
+4. A profile **without** an `engine` leaves out the hints the provider cannot take (`prompt`,
+   `vocabulary`, `speaker labels`) instead of failing. A prompt or vocabulary set directly on the
+   job or in settings for a provider that cannot take it is still refused with `400`.
+
+The transcript version's `provenance.options` records what was sent, including `prompt`,
+`profile: { id, name }`, and `ignoredProfileHints` when anything was left out. A job whose profile
+has been deleted fails with a message naming the problem; it does not fall back silently.
+
+## Onboarding
+
+First-run state lives under `/api/onboarding`, outside `/api/v1`. It never changes AI settings; the
+setup guide saves those through `PUT /api/ai-settings`.
+
+| Method | Path | Request / behavior |
+| --- | --- | --- |
+| GET | `/onboarding` | `{ completedAt, skipped, privacyMode, engine, engineLabel, engineReady, recordings, documents, profiles, defaultProfile }`. `engineReady` means a key or local binary is present; no provider is contacted |
+| POST | `/onboarding/complete` | `{ skipped?: boolean }` |
+| POST | `/onboarding/reset` | Shows the guide again on next load |
 
 ## AI Chat Conversations
 

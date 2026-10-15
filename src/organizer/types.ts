@@ -65,3 +65,17 @@ export interface ExportResult {
   items: ExportItem[];
 }
 export interface ExportStatus { configured: boolean; root: string | null; lastExportedAt: string | null; documentCount: number; error: string | null }
+
+/** Reviewable AI title and tag suggestions (KB-05); see `suggestions.ts`. */
+export interface DocumentSuggestions {
+  documentId: string;
+  revision: number;
+  /** A proposed title, or null when the model offered nothing usable or it equals the current one. */
+  title: string | null;
+  /** Proposed tags the note does not already carry. */
+  tags: string[];
+  provider: string;
+  model: string;
+  /** True when only the beginning of a long note was sent. */
+  truncated: boolean;
+}

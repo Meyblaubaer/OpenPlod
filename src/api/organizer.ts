@@ -8,8 +8,9 @@ import { purgeSchema, revisionSchema } from '../organizer/schemas';
 import { DocumentGenerationService, generateDocumentSchema } from '../organizer/generation';
 import { documentTemplateCatalog } from '../organizer/document-templates';
 import { MarkdownExporter } from '../organizer/markdown-export';
+import { DocumentSuggestionService } from '../organizer/suggestions';
 
-export function createOrganizerApi(store: OrganizerStore, delivery = new NoteDeliveryService(store), generation = new DocumentGenerationService(store), exporter = new MarkdownExporter(store)) {
+export function createOrganizerApi(store: OrganizerStore, delivery = new NoteDeliveryService(store), generation = new DocumentGenerationService(store), exporter = new MarkdownExporter(store), suggestions = new DocumentSuggestionService(store)) {
   const app = new Hono();
   app.use('*', async (c, next) => { c.header('Cache-Control', 'no-store'); await next(); });
   app.use('*', bodyLimit({ maxSize: 4 * 1024 * 1024, onError: c => c.json({ success: false, code: 'payload_too_large', error: 'Request is too large.' }, 413) }));
@@ -19,7 +20,7 @@ export function createOrganizerApi(store: OrganizerStore, delivery = new NoteDel
     if (error instanceof OrganizerError) return c.json({ success: false, code: error.code, error: error.message }, error.status);
     return c.json({ success: false, code: 'storage_error', error: 'The note operation could not be completed. Your last saved version is retained.' }, 500);
   });
-  app.get('/', c => c.json({ success: true, data: { schemaVersion: '1', capabilities: ['folders', 'documents', 'transcript-snapshots', 'versions', 'deliveries', 'tags', 'properties', 'sources', 'backlinks', 'jobs', 'views', 'markdown-export'], markdownLimitBytes: 524288, trashDays: 30 } }));
+  app.get('/', c => c.json({ success: true, data: { schemaVersion: '1', capabilities: ['folders', 'documents', 'transcript-snapshots', 'versions', 'deliveries', 'tags', 'properties', 'sources', 'backlinks', 'jobs', 'views', 'markdown-export', 'suggestions'], markdownLimitBytes: 524288, trashDays: 30 } }));
   app.get('/document-templates', c => c.json({ success: true, data: documentTemplateCatalog() }));
   app.get('/folders', c => c.json({ success: true, data: store.folders() }));
   app.get('/tags', c => c.json({ success: true, data: store.tags() }));
@@ -65,6 +66,7 @@ export function createOrganizerApi(store: OrganizerStore, delivery = new NoteDel
     response.headers.set('Cache-Control', 'no-store');
     return response;
   });
+  app.post('/documents/:id/suggestions', async c => c.json({ success: true, data: await suggestions.suggest(c.req.param('id'), c.req.raw.signal) }));
   app.get('/generations/:id', c => c.json({ success: true, data: generation.get(c.req.param('id')) }));
   app.post('/generations/:id/save', async c => c.json({ success: true, data: generation.save(c.req.param('id'), await c.req.json()) }));
   app.get('/documents/:id/source', c => c.json({ success: true, data: store.source(c.req.param('id')) }));

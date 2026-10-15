@@ -23,6 +23,7 @@ import {
 } from "@/components/icons";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { WorkspaceSearch } from "./WorkspaceSearch";
+import { OnboardingGate } from "./Onboarding";
 import { Brand } from "@/components/Brand";
 import { Button } from "@/components/ui/button";
 import {
@@ -133,6 +134,7 @@ export function Layout() {
 
   return (
     <TooltipProvider>
+      {!captureMode && <OnboardingGate />}
       <div className="app-shell">
         <aside className="desktop-sidebar">
           <div className="sidebar-brand">

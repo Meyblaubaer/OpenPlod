@@ -209,3 +209,19 @@
 @media (max-width: 720px) { .notes-metadata { padding-inline: 12px; } }
 /* Saved views (KB-01c) sit between the fixed views and the folder tree. */
 .notes-saved-views { margin: 8px 0 0; padding-top: 8px; border-top: 1px solid var(--border); }
+
+/* Reviewable AI title and tag suggestions (KB-05). */
+.notes-suggest { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border); font-size: 11px; color: var(--muted-foreground); background: transparent; cursor: pointer; }
+.notes-suggest:hover:not(:disabled) { color: var(--primary); border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); }
+.notes-suggest:disabled { opacity: .55; cursor: default; }
+.notes-suggest svg { width: 12px; height: 12px; }
+.notes-suggestions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--primary) 6%, var(--card)); border: 1px dashed color-mix(in srgb, var(--primary) 35%, var(--border)); font-size: 11px; }
+.notes-suggestions > button { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 3px 9px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border)); background: var(--card); color: var(--foreground); cursor: pointer; }
+.notes-suggestions > button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notes-suggestions > button:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+.notes-suggestions > button svg { width: 11px; height: 11px; flex: none; }
+.notes-suggestions > .notes-suggestions-all { border-style: dashed; color: var(--primary); }
+.notes-suggestions > small { margin-left: auto; color: var(--muted-foreground); }
+.notes-suggestions > .notes-suggestions-close { border: 0; padding: 2px; background: transparent; color: var(--muted-foreground); }
+.notes-suggestions-empty { color: var(--muted-foreground); }
+.notes-suggestions-error { margin-top: 4px; font-size: 11px; color: var(--destructive); overflow-wrap: anywhere; }

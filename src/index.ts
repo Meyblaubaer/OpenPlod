@@ -30,7 +30,10 @@ import { saveGeneratedTranscript } from './library/transcript-history';
 import { forwardRecordingWithRetry } from './library/forwarding';
 import { createAiSettingsApi } from './api/ai-settings';
 import { createJobsApi } from './api/jobs';
+import { createOnboardingApi } from './api/onboarding';
+import { createTranscriptionProfilesApi } from './api/transcription-profiles';
 import { aiConfigSchema, readAiConfig, readSettings, assertPrivacy } from './ai/config';
+import { effectiveTranscription } from './ai/transcription-profiles';
 import packageInfo from '../package.json';
 
 // ============================================
@@ -62,7 +65,8 @@ jobQueue.register('process-recording', async (data: any, job) => {
     await db.update(recordings).set({ status: 'complete', errorMessage: null }).where(eq(recordings.id, recordingId));
     return;
   }
-  const config = aiConfigSchema.parse(data.config);
+  // The profile is resolved when the job runs, so provenance records exactly what was sent.
+  const { config, options, profile, ignored } = effectiveTranscription(sqlite, aiConfigSchema.parse(data.config));
   const currentConfig = readAiConfig(sqlite);
   assertPrivacy(currentConfig, config.transcriptionEngine);
   console.log(`[Job] Processing recording ${recordingId}`);
@@ -76,7 +80,6 @@ jobQueue.register('process-recording', async (data: any, job) => {
     { primary, fallback: config.transcriptionFallback, localOnly: currentConfig.privacyMode === 'local-only' || config.privacyMode === 'local-only', beforeAttempt: provider => assertPrivacy(readAiConfig(sqlite), provider) },
     { mistralApiKey: settings.mistralApiKey, deepgramApiKey: settings.deepgramApiKey, openaiApiKey: settings.openaiApiKey, assemblyaiApiKey: settings.assemblyaiApiKey },
   );
-  const options = { model: config.transcriptionModel || undefined, language: config.transcriptionLanguage, diarize: config.transcriptionDiarize, vocabulary: config.transcriptionVocabulary };
   const startedAt = new Date().toISOString();
   const result = await router.transcribeFile(filePath, { ...options, signal: job.signal, checkpoint: job.checkpoint, onCheckpoint: job.saveCheckpoint });
   job.signal.throwIfAborted();
@@ -91,7 +94,7 @@ jobQueue.register('process-recording', async (data: any, job) => {
       confidence: result.confidence,
       fingerprint: data.fingerprint,
       generationId: job.id,
-      provenance: { provider: result.engine, model: result.metadata?.model ?? null, fingerprint: data.fingerprint, options, startedAt, completedAt: new Date().toISOString(), usage: result.metadata?.usage ?? null, language: result.metadata?.language ?? null },
+      provenance: { provider: result.engine, model: result.metadata?.model ?? null, fingerprint: data.fingerprint, options: { ...options, profile, ...(ignored.length ? { ignoredProfileHints: ignored } : {}) }, startedAt, completedAt: new Date().toISOString(), usage: result.metadata?.usage ?? null, language: result.metadata?.language ?? null },
     });
 
     if (documentUpdated && settings.autoSummarize === 'true') {
@@ -165,9 +168,11 @@ app.route('/api/mobile', mobileApi);
 app.route('/api/transcripts', transcriptsApi);
 const organizer = new OrganizerStore(sqlite);
 app.route('/api/v1/jobs', createJobsApi(jobQueue, sqlite));
+app.route('/api/v1/transcription-profiles', createTranscriptionProfilesApi(sqlite));
 app.route('/api/v1', createOrganizerApi(organizer));
 app.route('/api/ai', createRecordingAiApi(new RecordingAi(organizer)));
 app.route('/api/ai-settings', createAiSettingsApi(sqlite));
+app.route('/api/onboarding', createOnboardingApi(sqlite, () => new TranscriptionRouter({}, readSettings(sqlite)).status()));
 
 // Settings
 app.get('/api/settings', async (c) => {
@@ -217,7 +222,7 @@ app.put('/api/settings/:key', async (c) => {
     const config = readAiConfig(sqlite);
     if (config.privacyMode === 'local-only' && value !== 'whisper') return c.json({ success: false, error: 'Local-only mode blocks cloud transcription.' }, 400);
     config.transcriptionEngine = value;
-    config.transcriptionModel = ''; config.transcriptionDiarize = false; config.transcriptionVocabulary = [];
+    config.transcriptionModel = ''; config.transcriptionDiarize = false; config.transcriptionVocabulary = []; config.transcriptionPrompt = '';
     await db.insert(userSettings).values({ key: 'aiConfig', value: JSON.stringify(config) }).onConflictDoUpdate({ target: userSettings.key, set: { value: JSON.stringify(config) } });
   }
   await db.insert(userSettings).values({ key, value: String(value) })

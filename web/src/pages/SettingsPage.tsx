@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Save, Loader2, AlertCircle, Smartphone } from "@/components/icons"
+import { Save, Loader2, AlertCircle, Smartphone, Rocket } from "@/components/icons"
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -8,6 +8,8 @@ import { api, type Settings } from '@/lib/api'
 import { getRuntime } from '@/lib/runtime'
 import { buildInfo, buildLabel } from '@/lib/build-info'
 import { AiSettingsPanel } from '@/components/AiSettingsPanel'
+import { TranscriptionProfilesPanel } from '@/components/TranscriptionProfilesPanel'
+import { ONBOARDING_EVENT, onboardingApi } from '@/lib/ai-settings'
 
 function Toggle({ checked, onChange, label, description }: { checked: boolean; onChange: (v: boolean) => void; label: string; description: string }) {
   return (
@@ -37,6 +39,11 @@ export function SettingsPage() {
     if (hash === '#pairing' && pairingSection.current) {
       pairingSection.current.open = true
       pairingSection.current.scrollIntoView({ block: 'start' })
+    }
+    // Sections that load asynchronously (profiles) are scrolled to once they render.
+    else if (hash.length > 1) {
+      const timer = window.setTimeout(() => document.getElementById(hash.slice(1))?.scrollIntoView({ block: 'start' }), 300)
+      return () => window.clearTimeout(timer)
     }
   }, [hash])
   const runtime = getRuntime()
@@ -113,6 +120,7 @@ export function SettingsPage() {
       <details className="border-b pb-4">
         <summary className="cursor-pointer text-sm text-muted-foreground">About OpenPlod</summary>
         <dl className="grid gap-3 py-4 text-sm"><div><dt className="text-muted-foreground">Version</dt><dd>{buildInfo.version}</dd></div><div><dt className="text-muted-foreground">Installed build</dt><dd><time dateTime={buildInfo.builtAt}>{buildLabel}</time></dd></div><div><dt className="text-muted-foreground">Platform</dt><dd>{runtime.mode === 'desktop' ? 'Desktop' : runtime.mode === 'mobile' ? 'Mobile' : 'Browser'}</dd></div></dl>
+        <Button variant="outline" onClick={() => { void onboardingApi.reset().catch(() => {}).finally(() => window.dispatchEvent(new Event(ONBOARDING_EVENT))) }}><Rocket />Run the setup guide again</Button>
       </details>
 
       <details id="pairing" ref={pairingSection} className="border-b pb-4">
@@ -121,6 +129,7 @@ export function SettingsPage() {
       </details>
 
       <AiSettingsPanel />
+      <TranscriptionProfilesPanel />
 
       {/* Sync */}
       <Card>

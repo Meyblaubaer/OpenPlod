@@ -31,7 +31,8 @@ export class OpenAiEngine implements TranscriptionEngine {
     form.append('response_format', model === 'whisper-1' ? 'verbose_json' : 'json');
     if (model === 'whisper-1') form.append('timestamp_granularities[]', 'segment');
     if (options.language && options.language !== 'auto') form.append('language', options.language);
-    if (options.vocabulary?.length) form.append('prompt', options.vocabulary.join(', '));
+    const prompt = [options.prompt?.trim(), options.vocabulary?.join(', ')].filter(Boolean).join('\n');
+    if (prompt) form.append('prompt', prompt);
     const signal = AbortSignal.any([AbortSignal.timeout(180000), ...(options.signal ? [options.signal] : [])]);
     try {
       signal.throwIfAborted(); options.onCheckpoint?.({ phase: 'submitting' });

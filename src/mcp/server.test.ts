@@ -1,3 +1,5 @@
+import { createTranscriptionProfilesApi } from '../api/transcription-profiles';
+import { TranscriptionProfiles } from '../ai/transcription-profiles';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -99,11 +101,12 @@ test('read-only MCP exposes source, version, and job tools without any write pat
   queue.register('forward-recording', async () => { providerCalls++; });
   queue.cancel(job.id);
 
-  const jobsApi = createJobsApi(queue, db), organizerApi = createOrganizerApi(store);
+  const jobsApi = createJobsApi(queue, db), organizerApi = createOrganizerApi(store), profilesApi = createTranscriptionProfilesApi(db);
   const methods: string[] = [];
   const vault = new OpenPlodClient('http://127.0.0.1:3499', 'fixture-token', async (url, init) => {
     methods.push(init.method ?? 'GET');
     const { pathname, search } = new URL(url);
+    if (pathname.startsWith('/api/v1/transcription-profiles')) return profilesApi.request(pathname.replace('/api/v1/transcription-profiles', '') || '/', init);
     return pathname.startsWith('/api/v1/jobs')
       ? jobsApi.request(pathname.replace('/api/v1/jobs', '') || '/', init)
       : organizerApi.request(pathname.replace('/api/v1', '') + search, init);
@@ -114,7 +117,7 @@ test('read-only MCP exposes source, version, and job tools without any write pat
   await server.connect(left); await client.connect(right);
   try {
     const tools = (await client.listTools()).tools;
-    for (const name of ['list_transcript_versions', 'get_transcript_version', 'list_jobs', 'get_job', 'get_document_source', 'list_transcript_backlinks', 'list_tags', 'list_saved_views', 'get_markdown_export_status'])
+    for (const name of ['list_transcript_versions', 'get_transcript_version', 'list_jobs', 'get_job', 'get_document_source', 'list_transcript_backlinks', 'list_tags', 'list_saved_views', 'get_markdown_export_status', 'list_transcription_profiles'])
       expect(tools.map(tool => tool.name)).toContain(name);
     expect(tools.every(tool => tool.annotations?.readOnlyHint)).toBe(true);
     const text = async (name: string, args: Record<string, unknown>) => {
@@ -133,6 +136,10 @@ test('read-only MCP exposes source, version, and job tools without any write pat
     store.createView({ name: 'Inbox review', filters: { folderId: 'inbox' } });
     expect(JSON.parse((await text('list_saved_views', {})).body)).toMatchObject([{ name: 'Inbox review', filters: { folderId: 'inbox' } }]);
     expect(JSON.parse((await text('get_markdown_export_status', {})).body)).toHaveProperty('configured');
+    new TranscriptionProfiles(db).create({ preset: 'medical' });
+    const profiles = JSON.parse((await text('list_transcription_profiles', {})).body);
+    expect(profiles.profiles).toMatchObject([{ name: 'Medical consultation' }]);
+    expect(profiles.presets.length).toBeGreaterThan(3);
     expect(methods.every(method => method === 'GET')).toBe(true);
     expect(providerCalls).toBe(0);
   } finally { await client.close(); await server.close(); }
