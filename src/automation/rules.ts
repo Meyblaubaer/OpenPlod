@@ -360,7 +360,7 @@ export class RuleEngine {
           if (!this.deps.addToCollection) return this.setStep(step, 'skipped', 'Recording collections are not available in this version.');
           return this.deps.addToCollection(action.collectionId, recordingId)
             ? this.setStep(step, 'done', 'Added to the collection.', action.collectionId)
-            : this.setStep(step, 'skipped', 'The collection no longer exists.');
+            : this.setStep(step, 'skipped', 'The collection or the recording is no longer available.');
         }
         case 'notify_webhook': {
           if (!this.deps.webhooks) return this.setStep(step, 'skipped', 'Webhooks are not available.');

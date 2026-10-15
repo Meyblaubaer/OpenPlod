@@ -5,6 +5,7 @@ import { DocumentGenerationService } from '../organizer/generation';
 import { onAutomationEvent } from './hooks';
 import { WebhookService } from './webhooks';
 import { RuleEngine } from './rules';
+import { RecordingCollections } from '../knowledge/collections';
 import { TaskService } from './tasks';
 import { createAutomationsApi, createWebhooksApi } from './api';
 
@@ -15,12 +16,24 @@ import { createAutomationsApi, createWebhooksApi } from './api';
 export function startAutomation(params: { database: Database; queue: JobQueue; organizer: OrganizerStore; intervalMs?: number }) {
   const { database, queue, organizer } = params;
   const webhooks = new WebhookService(database);
+  const collections = new RecordingCollections(database);
   const generation = new DocumentGenerationService(organizer);
   const rules = new RuleEngine(database, {
     queue, webhooks,
     generateDocument: async request => {
       await generation.generate(request, async () => {});
       return generation.save(request.idempotencyKey, { folderId: request.folderId }).id;
+    },
+    // Adding is idempotent (INSERT OR IGNORE), so a retried step never duplicates membership.
+    addToCollection: (collectionId, recordingId) => {
+      try {
+        const current = collections.get(collectionId);
+        collections.add(collectionId, { recordingIds: [recordingId], revision: current.revision });
+        return true;
+      } catch (error) {
+        if ((error as { status?: number }).status === 404) return false;
+        throw error;
+      }
     },
   });
   const tasks = new TaskService(database);
