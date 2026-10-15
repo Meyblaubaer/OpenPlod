@@ -137,12 +137,13 @@ the reference Mac. After 1.0: live captions, two-way Obsidian sync, more Plaud m
 
 | Platform | Package | Notes |
 | --- | --- | --- |
-| macOS Apple Silicon | [Build from source](#build-the-mac-app) | 1.0.0 has no prebuilt binary. The last prebuilt ZIP is [0.5.0](https://github.com/RemiPelloux/OpenPlod/releases/tag/v0.5.0) (ad-hoc signed, not notarized). |
-| Linux | [Build from source](#build-the-linux-app) | `.deb`/`.rpm` bundles build with `bun run tauri:build`. |
-| Android ARM64 | [Build instructions](#android-companion) | Native, SDK-free direct Bluetooth adapter. Development build only; no public APK. |
+| macOS Apple Silicon | [OpenPlod_1.0.0_aarch64.dmg](https://github.com/RemiPelloux/OpenPlod/releases/download/v1.0.0/OpenPlod_1.0.0_aarch64.dmg) | Built by CI. Ad-hoc signed and not notarized until signing secrets are configured. |
+| Windows x64 | [Installer (.exe)](https://github.com/RemiPelloux/OpenPlod/releases/download/v1.0.0/OpenPlod_1.0.0_x64-setup.exe) or [.msi](https://github.com/RemiPelloux/OpenPlod/releases/download/v1.0.0/OpenPlod_1.0.0_x64_en-US.msi) | Built by CI, unsigned. Bluetooth extraction on Windows is not verified on hardware. |
+| Linux x64 | [.deb](https://github.com/RemiPelloux/OpenPlod/releases/download/v1.0.0/OpenPlod_1.0.0_amd64.deb) or [.rpm](https://github.com/RemiPelloux/OpenPlod/releases/download/v1.0.0/OpenPlod-1.0.0-1.x86_64.rpm) | Built by CI. Declares its BlueZ, D-Bus, and ffmpeg dependencies. |
+| Android ARM64 | [Build instructions](#android-companion) | Native, SDK-free direct Bluetooth adapter. Release signing uses your own keystore; no public APK. |
 | Source | [v1.0.0 source and release notes](https://github.com/RemiPelloux/OpenPlod/releases/tag/v1.0.0) | Frontend, backend, native adapters, API, MCP, and tests. |
 
-For the 0.5.0 ZIP, download `SHA256SUMS.txt` from the same release and verify it with `shasum -a 256 -c SHA256SUMS.txt`. Extract the archive, move `OpenPlod.app` to Applications, and open it. macOS may require explicit approval in Privacy & Security because the build is not notarized. Verify the source and checksum before approving it; do not disable Gatekeeper system-wide.
+Download `SHA256SUMS.txt` from the same release and verify your download with `shasum -a 256 -c SHA256SUMS.txt --ignore-missing`. On macOS, open the DMG and drag `OpenPlod.app` to Applications. macOS may require explicit approval in Privacy & Security because the build is not notarized. Verify the source and checksum before approving it; do not disable Gatekeeper system-wide.
 
 **Upgrade safely:** quit OpenPlod, back up the full vault, and replace only the application bundle. Do not delete its Application Support directory. Android development updates use an in-place install with the same application ID and signing key; uninstalling first can erase phone-local data.
 
