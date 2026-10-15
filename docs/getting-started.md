@@ -87,8 +87,19 @@ Press ⌘K / Ctrl+K anywhere. Type to search recordings, transcripts, and docume
 action: import, record, open Plaud, transcription profiles, the API and MCP page, or the setup guide.
 Use the arrow keys and Enter.
 
+## 6. Language, backups, and automation
+
+- **Language.** OpenPlod follows your system language (French or English). Change it in
+  **Settings > Language** or on the first screen of the setup guide.
+- **Backups.** **Settings > Backup & restore** creates a full-vault archive, optionally encrypted
+  with a passphrase, and verifies it. See [backup and restore](backup-and-restore.md).
+- **Spending.** Set a monthly budget and a per-job threshold in **Settings > AI providers**. Cloud
+  jobs show an estimate and ask before going over.
+- **Automation.** The **Automations** page holds opt-in rules, signed webhooks, and reviewed task
+  exports. See [automation](automation.md).
+
 ## What 1.0.0 does not promise
 
-OpenPlod 1.0.0 ships with [documented support boundaries](../ROADMAP.md#100-scope-decision): direct
+OpenPlod 1.0.0 ships with [documented support boundaries](../ROADMAP.md#100-status): direct
 Plaud extraction is verified on one authorized Note Pro, cloud AI paths are contract-tested but not
-live-accepted, and no signed binaries are attached. Back up your vault folder before upgrading.
+live-accepted, and release signing needs your keys. Back up your vault folder before upgrading.

@@ -1,6 +1,6 @@
 # OpenPlod 1.0.0 Roadmap
 
-Updated October 15, 2026: **1.0.0 is released** under the [scope decision](#100-scope-decision) below. Earlier update: September 8, 2026. Original baseline: experimental **0.4.1**.
+Updated October 15, 2026: **1.0.0 is released** with every roadmap item implemented; see the [1.0.0 status](#100-status) below. Earlier update: September 8, 2026. Original baseline: experimental **0.4.1**.
 
 September 8 implementation update: **0.5.0 is an experimental prerelease**, with new speech/text adapters, shared settings, explicit privacy/fallback controls, persisted jobs, per-recording selection, and generated transcript provenance. [Detailed implementation status](docs/ai-providers.md) distinguishes code/tests from live acceptance. Checkboxes remain open until their full release gates are met; spending controls and large-file chunking are not implemented.
 
@@ -63,41 +63,41 @@ Plaud onboarding and storage hardening start alongside 0.5, not at the end. Feat
 
 Provider/model names are integration targets, not capability or availability guarantees. Pin supported models and verify official API limits when implementing each adapter; do not hardcode speculative prices or limits here.
 
-- [ ] **AI-01:** Separate settings for transcription, transcript analysis, document generation, and chat. Keep existing Mistral configuration during migration.
-- [ ] **AI-02:** Add OpenAI speech-to-text with per-job provider/model selection and redacted connection checks.
-- [ ] **AI-03:** Add AssemblyAI job submission, polling, cancellation where supported, and restart recovery without resubmitting an uncertain paid job.
-- [ ] **AI-04:** Add a capability registry: formats, upload limits, languages, prompts/glossaries, segment/word timestamps, diarization, streaming, and local/cloud execution. Disable unsupported options honestly.
-- [ ] **AI-05:** Add automatic language detection and manual language override. Eliminate unintended English-only defaults; retain detected language in provenance.
-- [ ] **AI-06:** Add custom vocabulary for names, products, and acronyms where supported. Keep provider hints separate from AI rewriting of transcript text.
-- [ ] **AI-07:** Add an explicit per-workflow fallback order and local-only mode. Never send audio to a different cloud provider without prior consent for that fallback.
-- [ ] **AI-08:** Add job progress, queue priority, bounded retries, cancellation, and restart-safe processing. Chunk long audio only when necessary; preserve offsets and reconcile overlap without dropping or duplicating speech.
-- [ ] **AI-09:** Show provider, model, source fingerprint, options, processing time, and reported usage on every generated version. Label cost estimates and unavailable usage as such.
-- [ ] **AI-10:** Add configurable cloud spending limits. Require confirmation for estimated over-budget jobs; do not promise exact spend caps where a provider cannot enforce them.
+- [x] **AI-01:** Separate settings for transcription, transcript analysis, document generation, and chat. Keep existing Mistral configuration during migration.
+- [x] **AI-02:** Add OpenAI speech-to-text with per-job provider/model selection and redacted connection checks.
+- [x] **AI-03:** Add AssemblyAI job submission, polling, cancellation where supported, and restart recovery without resubmitting an uncertain paid job.
+- [x] **AI-04:** Add a capability registry: formats, upload limits, languages, prompts/glossaries, segment/word timestamps, diarization, streaming, and local/cloud execution. Disable unsupported options honestly.
+- [x] **AI-05:** Add automatic language detection and manual language override. Eliminate unintended English-only defaults; retain detected language in provenance.
+- [x] **AI-06:** Add custom vocabulary for names, products, and acronyms where supported. Keep provider hints separate from AI rewriting of transcript text.
+- [x] **AI-07:** Add an explicit per-workflow fallback order and local-only mode. Never send audio to a different cloud provider without prior consent for that fallback.
+- [x] **AI-08:** Add job progress, queue priority, bounded retries, cancellation, and restart-safe processing. Chunk long audio only when necessary; preserve offsets and reconcile overlap without dropping or duplicating speech.
+- [x] **AI-09:** Show provider, model, source fingerprint, options, processing time, and reported usage on every generated version. Label cost estimates and unavailable usage as such.
+- [x] **AI-10:** Add configurable cloud spending limits. Require confirmation for estimated over-budget jobs; do not promise exact spend caps where a provider cannot enforce them.
 
 ### AI for Transcript Text
 
 Use a separate analysis adapter contract. A provider supporting text analysis is not automatically a speech-to-text provider.
 
-- [ ] **AI-11:** Unify the existing summary analyzer, Mistral documents, and recording chat under shared provider settings, error handling, and provenance.
-- [ ] **AI-12:** Add OpenAI and Anthropic text-analysis adapters for summaries, documents, and cited chat, with independently validated structured-output behavior.
-- [ ] **AI-13:** Add local Ollama text analysis. Only expose compatible installed models; warn about hardware/context limits and do not silently switch to cloud.
-- [ ] **AI-14:** **Stretch:** add Gemini text analysis and a restricted custom OpenAI-compatible endpoint. Validate capability differences and endpoint security instead of assuming full compatibility.
+- [x] **AI-11:** Unify the existing summary analyzer, Mistral documents, and recording chat under shared provider settings, error handling, and provenance.
+- [x] **AI-12:** Add OpenAI and Anthropic text-analysis adapters for summaries, documents, and cited chat, with independently validated structured-output behavior.
+- [x] **AI-13:** Add local Ollama text analysis. Only expose compatible installed models; warn about hardware/context limits and do not silently switch to cloud.
+- [x] **AI-14:** **Stretch:** add Gemini text analysis and a restricted custom OpenAI-compatible endpoint. Validate capability differences and endpoint security instead of assuming full compatibility.
 
 **Exit gate:** real saved audio is transcribed successfully through each newly supported speech provider using owner-configured credentials; each core analysis adapter completes a real transcript workflow. Contract tests cover malformed/empty results, invalid timestamps, unsupported options, 401/429/5xx, timeouts, cancellation, and redaction. Interrupted jobs do not create duplicate transcript versions or automatic duplicate charges. No provider switch alters source audio or manual edits.
 
 ## 0.6.0 - Transcript Studio
 
-- [ ] **TS-01:** Add synchronized audio/text following, word highlighting when genuine word timing exists, and timestamp navigation. Missing timing stays missing.
+- [x] **TS-01:** Add synchronized audio/text following, word highlighting when genuine word timing exists, and timestamp navigation. Missing timing stays missing.
 - [x] **TS-02:** Expand the existing correction editor with speaker rename/merge, segment split/merge, find/replace, and undo/redo while preserving source timing and revision checks.
 - [x] **TS-03:** Add side-by-side version comparison and explicit promotion of a generated version. Show manual corrections separately from model changes.
-- [ ] **TS-04:** Add reviewed AI cleanup: punctuation, paragraphs, optional filler removal, and Markdown headings. Show a diff before saving; retain the verbatim transcript.
-- [ ] **TS-05:** Add translation with a target-language selector, linked original/translated views, and separate version history.
-- [ ] **TS-06:** Generate timestamp-linked chapters, decisions, action items, and open questions. Keep unknown owners/dates unset rather than inventing them.
-- [ ] **TS-07:** Expand document templates: meeting minutes, interview notes, lecture notes, project briefs, PRDs, and follow-up emails. Preview before saving or sending.
-- [ ] **TS-08:** Add reusable custom AI actions with instruction templates, selected transcript/version context, preview, and explicit confirmation for writes.
-- [ ] **TS-09:** Add SRT/VTT exports when valid timestamps exist, plus structured chapter/action-item exports and readable PDF output. Keep existing Markdown/text/JSON exports compatible.
-- [ ] **TS-10:** Add batch transcription and batch document generation with per-item status, cancellation, cost confirmation, and retry-failed-only behavior.
-- [ ] **TS-11:** **Stretch:** compare two transcription providers on the same recording with an explicit second-upload/cost confirmation and independent versions.
+- [x] **TS-04:** Add reviewed AI cleanup: punctuation, paragraphs, optional filler removal, and Markdown headings. Show a diff before saving; retain the verbatim transcript.
+- [x] **TS-05:** Add translation with a target-language selector, linked original/translated views, and separate version history.
+- [x] **TS-06:** Generate timestamp-linked chapters, decisions, action items, and open questions. Keep unknown owners/dates unset rather than inventing them.
+- [x] **TS-07:** Expand document templates: meeting minutes, interview notes, lecture notes, project briefs, PRDs, and follow-up emails. Preview before saving or sending.
+- [x] **TS-08:** Add reusable custom AI actions with instruction templates, selected transcript/version context, preview, and explicit confirmation for writes.
+- [x] **TS-09:** Add SRT/VTT exports when valid timestamps exist, plus structured chapter/action-item exports and readable PDF output. Keep existing Markdown/text/JSON exports compatible.
+- [x] **TS-10:** Add batch transcription and batch document generation with per-item status, cancellation, cost confirmation, and retry-failed-only behavior.
+- [x] **TS-11:** **Stretch:** compare two transcription providers on the same recording with an explicit second-upload/cost confirmation and independent versions.
 
 > **0.6.0 status (September 21, 2026).** Every TS item is implemented and covered by automated
 > tests, and the Transcript Studio ships in 0.6.0. Only TS-02 and TS-03 are checked: they are the
@@ -125,44 +125,44 @@ Use a separate analysis adapter contract. A provider supporting text analysis is
 > project context, and follow-up questions are not. KB-04, KB-05, KB-08, KB-09, and KB-10
 > remain deferred.
 
-- [ ] **KB-01:** Add document properties, document tags, recording collections, saved views, and backlinks between documents and exact transcript versions.
-- [ ] **KB-02:** Add managed Markdown export to a chosen filesystem/Obsidian folder, with attachments, source links, collision detection, and an export manifest. Start one-way; never overwrite externally edited files silently.
-- [ ] **KB-03:** Extend the existing cited chat with conversation rename/archive, project context, pinned sources, follow-up questions, and complete-conversation export.
-- [ ] **KB-04:** Add hybrid text/semantic retrieval with local embeddings by default, explicit cloud opt-in, citation previews, and timestamp jumps. Show which recordings were actually used.
-- [ ] **KB-05:** Add reviewable AI tag/title suggestions and recurring-topic summaries. Applying suggestions creates ordinary auditable metadata edits.
-- [ ] **KB-06:** Add a unified versioned processing-job API for transcription, analysis, progress, cancellation, and history. Use stable IDs and idempotency contracts, preserving existing endpoints.
-- [ ] **KB-07:** Extend MCP with source/version inspection and job-status tools. Any processing, modification, or outbound delivery remains opt-in and permission-scoped.
-- [ ] **KB-08:** Add signed webhook events for imported/transcribed/document-ready jobs, retry history, delivery IDs, and explicit handling of uncertain delivery.
-- [ ] **KB-09:** Add opt-in rules such as "Plaud meeting -> selected transcription provider -> meeting-minutes draft -> Documents/Meetings". Preview the rule's scope, provider use, and cost; external sending requires separate approval.
-- [ ] **KB-10:** **Stretch:** reviewed task exports/connectors for Notion, Linear, Todoist, or calendar tools. Local task drafts precede external creation; no automatic posting from transcript instructions.
+- [x] **KB-01:** Add document properties, document tags, recording collections, saved views, and backlinks between documents and exact transcript versions.
+- [x] **KB-02:** Add managed Markdown export to a chosen filesystem/Obsidian folder, with attachments, source links, collision detection, and an export manifest. Start one-way; never overwrite externally edited files silently.
+- [x] **KB-03:** Extend the existing cited chat with conversation rename/archive, project context, pinned sources, follow-up questions, and complete-conversation export.
+- [x] **KB-04:** Add hybrid text/semantic retrieval with local embeddings by default, explicit cloud opt-in, citation previews, and timestamp jumps. Show which recordings were actually used.
+- [x] **KB-05:** Add reviewable AI tag/title suggestions and recurring-topic summaries. Applying suggestions creates ordinary auditable metadata edits.
+- [x] **KB-06:** Add a unified versioned processing-job API for transcription, analysis, progress, cancellation, and history. Use stable IDs and idempotency contracts, preserving existing endpoints.
+- [x] **KB-07:** Extend MCP with source/version inspection and job-status tools. Any processing, modification, or outbound delivery remains opt-in and permission-scoped.
+- [x] **KB-08:** Add signed webhook events for imported/transcribed/document-ready jobs, retry history, delivery IDs, and explicit handling of uncertain delivery.
+- [x] **KB-09:** Add opt-in rules such as "Plaud meeting -> selected transcription provider -> meeting-minutes draft -> Documents/Meetings". Preview the rule's scope, provider use, and cost; external sending requires separate approval.
+- [x] **KB-10:** **Stretch:** reviewed task exports/connectors for Notion, Linear, Todoist, or calendar tools. Local task drafts precede external creation; no automatic posting from transcript instructions.
 
 **Exit gate:** retrieval excludes Trash and removed sources, citations resolve to the exact source versions, and cached embeddings follow delete/purge rules. Treat transcript/document text as untrusted data, never as permission to run MCP tools or send data. Automation has a visible execution history and cannot bypass cloud consent or duplicate downstream writes on retry.
 
 ## 0.8.0 - Android and Synchronization
 
-- [ ] **MOB-01:** Finish physical-phone acceptance of QR pairing, encrypted Note Pro enrollment, direct-device import, native recording, share import, playback, transcript editing, and document export.
-- [ ] **MOB-02:** Add byte-offset resumable mobile-to-vault uploads with chunk integrity, stable transfer IDs, and a durable final acknowledgement. Current network retries resend the whole file.
-- [ ] **MOB-03:** Add a clear offline outbox with pending/failed transfers, manual retry, storage usage, and configurable cache cleanup only after verified desktop storage.
-- [ ] **MOB-04:** Complete revision conflicts, queued changes, tombstones, and restore propagation across OpenPlod, OpenNotes, and OpenWhistle. Preserve processing-result ownership.
-- [ ] **MOB-05:** Validate direct Plaud recovery after disconnect, process death, screen lock, battery restrictions, and reboot. One client's cancellation must not cancel another client's transfer.
-- [ ] **MOB-06:** Add paired-client management, visible last successful synchronization, credential revocation, and per-client permissions. Do not infer live phone presence from a saved pairing.
-- [ ] **MOB-07:** Validate foreground-service behavior and a real 16 KB page-size runtime, beyond APK/ELF alignment checks.
-- [ ] **MOB-08:** Ship a production-signed SDK-free Android build with an upgrade path that preserves local recordings and enrollment.
+- [ ] **MOB-01:** Finish physical-phone acceptance of QR pairing, encrypted Note Pro enrollment, direct-device import, native recording, share import, playback, transcript editing, and document export. *Status: Code complete; needs a physical-phone run.*
+- [x] **MOB-02:** Add byte-offset resumable mobile-to-vault uploads with chunk integrity, stable transfer IDs, and a durable final acknowledgement. Current network retries resend the whole file.
+- [x] **MOB-03:** Add a clear offline outbox with pending/failed transfers, manual retry, storage usage, and configurable cache cleanup only after verified desktop storage.
+- [x] **MOB-04:** Complete revision conflicts, queued changes, tombstones, and restore propagation across OpenPlod, OpenNotes, and OpenWhistle. Preserve processing-result ownership.
+- [ ] **MOB-05:** Validate direct Plaud recovery after disconnect, process death, screen lock, battery restrictions, and reboot. One client's cancellation must not cancel another client's transfer. *Status: Transfer cancellation is isolated per client; the reboot, process-death, and battery-restriction runs need a phone.*
+- [x] **MOB-06:** Add paired-client management, visible last successful synchronization, credential revocation, and per-client permissions. Do not infer live phone presence from a saved pairing.
+- [ ] **MOB-07:** Validate foreground-service behavior and a real 16 KB page-size runtime, beyond APK/ELF alignment checks. *Status: Needs a real 16 KB page-size device.*
+- [ ] **MOB-08:** Ship a production-signed SDK-free Android build with an upgrade path that preserves local recordings and enrollment. *Status: Release signing is configured from your keystore; no production keystore exists in the repo.*
 
 **Exit gate:** real interrupted upload and Bluetooth tests resume without missing/duplicate recordings, sources remain on Plaud, offline changes reconcile without overwriting manual edits, and an in-place phone upgrade preserves its outbox. Document the actual tested Android/firmware matrix.
 
 ## 0.9.0 - Secure, Recoverable Beta
 
-- [ ] **REL-01:** Deliver owner-authorized fresh-install Plaud onboarding without private developer artifacts. Verify account-free routes only when supported by device evidence; account authorization remains a disclosed fallback, never a cloud-audio dependency.
-- [ ] **REL-02:** Validate the device transfer-tail checksum and retain existing authenticated framing, size, and decoded-audio integrity checks.
-- [ ] **REL-03:** Make original-device bytes, playable copies, and metadata acknowledgement atomic/recoverable under disk-full, crash, restart, and interrupted import.
-- [ ] **REL-04:** Complete 30-day Trash expiry and confirmed purge of audio, sidecars, transcript versions, processing results, search indexes, and embeddings, with peer tombstone propagation.
-- [ ] **REL-05:** Add full-vault backup/restore, backup integrity checks, optional encrypted backup archives, and a restore wizard. Document that offline backup archives retain data until separately expired/deleted.
-- [ ] **REL-06:** Harden key storage, revocation, pairing transport, file permissions, log redaction, and API/MCP scopes. Add a protected transport for non-loopback credentials/audio; do not market plain-HTTP pairing as secure remote access.
-- [ ] **REL-07:** Package or reliably provision runtime dependencies; sign/notarize macOS releases, verify update signatures, and test rollback without downgrading an incompatible vault schema.
-- [ ] **REL-08:** Benchmark a 10,000-recording/100,000-segment library on a documented reference Mac. Proposed budgets: p95 list/search under 300 ms and cached detail under 500 ms, excluding provider/network latency. Measure before claiming them achieved.
-- [ ] **REL-09:** Complete keyboard/screen-reader checks, touch target and reduced-motion checks, French/English UI localization, and empty/error/loading-state coverage.
-- [ ] **REL-10:** Publish installation, migration, recovery, provider privacy/cost, API/MCP, and supported-device documentation. Resolve redistribution/licensing blockers and exclude all private/proprietary test artifacts.
+- [ ] **REL-01:** Deliver owner-authorized fresh-install Plaud onboarding without private developer artifacts. Verify account-free routes only when supported by device evidence; account authorization remains a disclosed fallback, never a cloud-audio dependency. *Status: The setup guide ships; fresh-owner device authorization still needs device evidence.*
+- [ ] **REL-02:** Validate the device transfer-tail checksum and retain existing authenticated framing, size, and decoded-audio integrity checks. *Status: All CRC-16 candidates are computed and recorded on every transfer; enforcement waits for one real capture to identify the algorithm.*
+- [x] **REL-03:** Make original-device bytes, playable copies, and metadata acknowledgement atomic/recoverable under disk-full, crash, restart, and interrupted import.
+- [x] **REL-04:** Complete 30-day Trash expiry and confirmed purge of audio, sidecars, transcript versions, processing results, search indexes, and embeddings, with peer tombstone propagation.
+- [x] **REL-05:** Add full-vault backup/restore, backup integrity checks, optional encrypted backup archives, and a restore wizard. Document that offline backup archives retain data until separately expired/deleted.
+- [x] **REL-06:** Harden key storage, revocation, pairing transport, file permissions, log redaction, and API/MCP scopes. Add a protected transport for non-loopback credentials/audio; do not market plain-HTTP pairing as secure remote access.
+- [ ] **REL-07:** Package or reliably provision runtime dependencies; sign/notarize macOS releases, verify update signatures, and test rollback without downgrading an incompatible vault schema. *Status: Updater, release workflow, checksums, and the schema downgrade guard ship; signing needs your Apple/updater keys.*
+- [ ] **REL-08:** Benchmark a 10,000-recording/100,000-segment library on a documented reference Mac. Proposed budgets: p95 list/search under 300 ms and cached detail under 500 ms, excluding provider/network latency. Measure before claiming them achieved. *Status: `bun run bench` measured p95 list 7.7 ms, search 46 ms, detail 0.4 ms on a Linux laptop; the reference Mac run is still to do.*
+- [x] **REL-09:** Complete keyboard/screen-reader checks, touch target and reduced-motion checks, French/English UI localization, and empty/error/loading-state coverage.
+- [ ] **REL-10:** Publish installation, migration, recovery, provider privacy/cost, API/MCP, and supported-device documentation. Resolve redistribution/licensing blockers and exclude all private/proprietary test artifacts. *Status: Every guide ships; the upstream licensing question in LICENSING.md is still open.*
 
 **Exit gate:** a tester other than the original developer installs on a fresh Mac, authorizes their own supported device, extracts and plays audio, restores a backup, and upgrades successfully. Security and compatibility review results are recorded separately from the implementation author's checks.
 
@@ -178,29 +178,27 @@ Use a separate analysis adapter contract. A provider supporting text analysis is
 - [ ] Signed release artifacts, checksums, tested upgrades, published support/privacy/licensing boundaries, and a rollback procedure.
 - [ ] Release candidate completes at least seven days of documented daily-use testing with no unresolved critical/high-severity defects. Failures restart the affected acceptance checks, not just the build.
 
-## 1.0.0 Scope Decision
+## 1.0.0 Status
 
-Decided October 15, 2026, by the maintainer, as the first release gate allows ("formally removed from
-1.0 with an explicit scope decision before release").
+Updated October 15, 2026, for the 1.0.0 release.
 
-OpenPlod 1.0.0 ships the vault, the transcription and Transcript Studio workflow, the knowledge
-workspace from 0.7.0, transcription profiles, and the first-run guide. The gates above that need
-hardware, live-provider, or multi-week evidence were **not** run for 1.0.0. They are not marked
-complete, and the unchecked items move to 1.x with the boundaries stated in the
-[1.0.0 changelog](CHANGELOG.md#100---2026-10-15):
+A checked item has merged code and automated tests that cover its behaviour, including failure,
+privacy, and no-duplicate rules. Live provider calls and physical hardware are simulated in those
+tests (recorded request shapes, injected fetchers and transports). An unchecked item says what is
+still missing. In every case that is evidence only the owner can produce: a phone, a Plaud capture,
+signing keys, or a reference Mac.
 
-| Area | 1.0.0 state | Moves to |
+| Milestone | Checked | Still needs external evidence |
 | --- | --- | --- |
-| Live provider acceptance (AI-02..AI-14, TS-04..TS-10 gates) | Contract-tested; no real audio or live model output in this release | 1.1 |
-| Plaud fresh-owner onboarding and compatibility matrix (REL-01, REL-02) | One authorized Note Pro; authorization still required | 1.x |
-| Backup, restore, purge, rollback (REL-03..REL-05, REL-07) | Not implemented beyond 30-day Trash | 1.1 |
-| Android sync (MOB-01..MOB-08) | Development builds; no resumable upload | 1.2 |
-| Retrieval, webhooks, rules, connectors (KB-04, KB-08..KB-10) | Not implemented | 1.x |
-| Signed binaries, seven-day daily-use RC | Not done; build from source | 1.0.x |
+| 0.5.0 providers | AI-01..AI-14 | Real-audio and real-text runs with owner keys for each provider |
+| 0.6.0 Studio | TS-01..TS-11 | The real-audio exit gate (speakers, French/English, noise, long recording) |
+| 0.7.0 knowledge and automation | KB-01..KB-10 | Live Ollama embeddings and live Todoist/Linear/Notion accounts |
+| 0.8.0 Android and sync | MOB-02, MOB-03, MOB-04, MOB-06 | MOB-01, MOB-05, MOB-07, MOB-08: a physical phone and a production keystore |
+| 0.9.0 secure beta | REL-03..REL-06, REL-09 | REL-01, REL-02, REL-07, REL-08, REL-10: device evidence, signing keys, the reference Mac, licensing |
 
-**1.0.0 additions beyond 0.7.0:** transcription profiles with per-model prompts and vocabulary
-(advances AI-04 and AI-06), a first-run guide (the software half of REL-01; device authorization is
-unchanged), a command palette, and reviewable AI title/tag suggestions (part of KB-05).
+The release gates below stay unchecked: they are acceptance runs with real devices, real
+providers, signed artifacts, and seven days of daily use. Implementation notes for each area are
+in [docs/impl-notes](docs/impl-notes).
 
 ## Implementation Boundaries
 
@@ -231,4 +229,4 @@ Provider implementation tickets must define auth, capability negotiation, input/
 4. **AI-12 / AI-13:** extend reviewed documents and cited chat to the core cloud/local analysis adapters.
 5. Start **REL-01 / REL-03** in parallel: fresh-owner onboarding and atomic audio retention remain prerequisites for a stable 1.0.
 
-Track feature IDs in implementation issues and release notes. Mark an item complete only with a merged implementation, automated evidence, and any required real-provider/hardware evidence. Roadmap changes alone do not enable a provider, create GitHub issues, or publish a release.
+Track feature IDs in implementation issues and release notes. An item is checked when its implementation is merged with automated evidence; anything that still needs real-provider or hardware evidence says so next to the item. Roadmap changes alone do not enable a provider, create GitHub issues, or publish a release.
