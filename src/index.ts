@@ -34,6 +34,8 @@ import { createOnboardingApi } from './api/onboarding';
 import { createTranscriptionProfilesApi } from './api/transcription-profiles';
 import { aiConfigSchema, readAiConfig, readSettings, assertPrivacy } from './ai/config';
 import { effectiveTranscription } from './ai/transcription-profiles';
+import { startAutomation } from './automation';
+import { emitAutomationEvent } from './automation/hooks';
 import packageInfo from '../package.json';
 
 // ============================================
@@ -96,6 +98,7 @@ jobQueue.register('process-recording', async (data: any, job) => {
       generationId: job.id,
       provenance: { provider: result.engine, model: result.metadata?.model ?? null, fingerprint: data.fingerprint, options: { ...options, profile, ...(ignored.length ? { ignoredProfileHints: ignored } : {}) }, startedAt, completedAt: new Date().toISOString(), usage: result.metadata?.usage ?? null, language: result.metadata?.language ?? null },
     });
+    void emitAutomationEvent({ type: 'recording.transcribed', recordingId, transcriptVersionId: job.id, provider: result.engine, model: typeof result.metadata?.model === 'string' ? result.metadata.model : null, current: documentUpdated });
 
     if (documentUpdated && settings.autoSummarize === 'true') {
       await db.update(recordings).set({ status: 'summarizing' }).where(eq(recordings.id, recordingId));
@@ -169,6 +172,9 @@ app.route('/api/transcripts', transcriptsApi);
 const organizer = new OrganizerStore(sqlite);
 app.route('/api/v1/jobs', createJobsApi(jobQueue, sqlite));
 app.route('/api/v1/transcription-profiles', createTranscriptionProfilesApi(sqlite));
+const automation = startAutomation({ database: sqlite, queue: jobQueue, organizer });
+app.route('/api/v1/webhooks', automation.webhooksApi);
+app.route('/api/v1/automations', automation.automationsApi);
 app.route('/api/v1', createOrganizerApi(organizer));
 app.route('/api/ai', createRecordingAiApi(new RecordingAi(organizer)));
 app.route('/api/ai-settings', createAiSettingsApi(sqlite));
