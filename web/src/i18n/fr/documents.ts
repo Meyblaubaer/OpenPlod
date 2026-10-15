@@ -535,4 +535,5 @@ export const documents: Record<string, string> = {
   "{name} (on this computer)": "{name} (sur cet ordinateur)",
   "{provider} is structuring your document...": "{provider} structure votre document…",
   "{title} / Saved revision {revision}": "{title} / Révision enregistrée {revision}",
+  'Import Markdown files': 'Importer des fichiers Markdown',
 }

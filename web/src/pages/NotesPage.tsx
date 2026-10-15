@@ -194,7 +194,7 @@ export function NotesPage() {
   }
 
   return <div className="notes-workspace" data-document={!!selectedId}>
-    <input type="file" ref={importRef} multiple accept=".md,.markdown,text/markdown" className="sr-only" onChange={event => { const files = [...(event.target.files || [])]; event.target.value = ''; void importFiles(files) }} />
+    <input type="file" ref={importRef} multiple accept=".md,.markdown,text/markdown" className="sr-only" aria-label={t('Import Markdown files')} tabIndex={-1} onChange={event => { const files = [...(event.target.files || [])]; event.target.value = ''; void importFiles(files) }} />
     {error && <div className="notes-message note-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError('')} aria-label={t('Dismiss error')}><X /></button></div>}
     {notice && <div className="notes-message" role="status"><Check /><span>{notice}</span></div>}
     <div className="notes-columns">

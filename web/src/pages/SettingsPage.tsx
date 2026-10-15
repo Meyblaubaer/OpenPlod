@@ -153,8 +153,9 @@ export function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium">{t('Plaud Sync Folder')}</label>
+            <label htmlFor="settings-sync-folder" className="text-sm font-medium">{t('Plaud Sync Folder')}</label>
             <Input
+              id="settings-sync-folder"
               value={settings.syncFolderPath}
               onChange={e => update({ syncFolderPath: e.target.value })}
             />
@@ -228,16 +229,16 @@ export function SettingsPage() {
             description={t('Send imported audio to OpenWhistle for agents and connectors')}
           />
           <div className="space-y-2">
-            <label className="text-sm font-medium">{t('API base URL')}</label>
-            <Input value={settings.openWhistleBaseUrl} onChange={e => update({ openWhistleBaseUrl: e.target.value })} placeholder="https://openwhistle.pro/api/v1" />
+            <label htmlFor="settings-ow-url" className="text-sm font-medium">{t('API base URL')}</label>
+            <Input id="settings-ow-url" value={settings.openWhistleBaseUrl} onChange={e => update({ openWhistleBaseUrl: e.target.value })} placeholder="https://openwhistle.pro/api/v1" />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium">{t('Agent ID')}</label>
-            <Input value={settings.openWhistleAgentId} onChange={e => update({ openWhistleAgentId: e.target.value })} />
+            <label htmlFor="settings-ow-agent" className="text-sm font-medium">{t('Agent ID')}</label>
+            <Input id="settings-ow-agent" value={settings.openWhistleAgentId} onChange={e => update({ openWhistleAgentId: e.target.value })} />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium">{t('API key')}</label>
-            <Input type="password" value={settings.openWhistleApiKey || ''} onChange={e => update({ openWhistleApiKey: e.target.value })} placeholder={settings.openWhistleApiKeyConfigured ? t('Saved key (enter a new key to replace)') : 'owk_...'} />
+            <label htmlFor="settings-ow-key" className="text-sm font-medium">{t('API key')}</label>
+            <Input id="settings-ow-key" type="password" value={settings.openWhistleApiKey || ''} onChange={e => update({ openWhistleApiKey: e.target.value })} placeholder={settings.openWhistleApiKeyConfigured ? t('Saved key (enter a new key to replace)') : 'owk_...'} />
           </div>
         </CardContent>
       </Card>

@@ -332,7 +332,7 @@ export function Dashboard() {
               <button
                 className="studio-control"
                 onClick={() => setFiltersOpen(true)}
-                aria-label={t("Filter recordings")}
+                title={t("Filter recordings")}
               >
                 <SlidersHorizontal />
                 <span>{t("Filters")}</span>
