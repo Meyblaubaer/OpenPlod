@@ -17,6 +17,7 @@ const SettingsPage = lazy(() => import('@/pages/SettingsPage').then(module => ({
 const RecordingPage = lazy(() => import('@/pages/RecordingPage').then(module => ({ default: module.RecordingPage })))
 const ImportPage = lazy(() => import('@/pages/ImportPage').then(module => ({ default: module.ImportPage })))
 const DeveloperPage = lazy(() => import('@/pages/DeveloperPage').then(module => ({ default: module.DeveloperPage })))
+const AutomationsPage = lazy(() => import('@/pages/AutomationsPage').then(module => ({ default: module.AutomationsPage })))
 
 function PageFallback() {
   return (
@@ -39,6 +40,7 @@ export default function App() {
               <Route path="/recordings" element={<Dashboard />} />
               <Route path="/import" element={<ImportPage />} />
               <Route path="/developer" element={<DeveloperPage />} />
+              <Route path="/automations" element={<AutomationsPage />} />
               <Route path="/recording/:id" element={<RecordingDetail />} />
               <Route path="/record" element={<RecordingPage />} />
               <Route path="/transcripts" element={<TranscriptsPage />} />

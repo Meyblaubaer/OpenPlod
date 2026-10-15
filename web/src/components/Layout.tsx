@@ -20,6 +20,7 @@ import {
   UserRound,
   MessageSquare,
   Workflow,
+  Wand2,
 } from "@/components/icons";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { WorkspaceSearch } from "./WorkspaceSearch";
@@ -49,6 +50,7 @@ const desktopNav = [
   nav[1],
   { to: "/notes", icon: NotebookPen, label: "Documents" },
   { to: "/ai", icon: MessageSquare, label: "AI Chat" },
+  { to: "/automations", icon: Wand2, label: "Automations" },
 ];
 
 export function Layout() {

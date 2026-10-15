@@ -1,6 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import { sqlite } from '../db/client';
 import { readAiConfig } from '../ai/config';
+import { emitAutomationEvent } from '../automation/hooks';
 
 export interface Job<T = unknown> {
   id: string; type: string; data: T; status: 'pending' | 'running' | 'complete' | 'failed' | 'cancelled';
@@ -101,6 +102,8 @@ export class JobQueue {
           if (!controller.signal.aborted) { job.status = 'failed'; job.error = error instanceof Error ? error.message : 'Processing failed.'; }
         } finally {
           job.completedAt = new Date(); this.persist(job); this.controllers.delete(job.id);
+          if (job.status === 'failed') void emitAutomationEvent({ type: 'job.failed', jobId: job.id, jobType: job.type, error: job.error ?? null,
+            recordingId: typeof (job.data as { recordingId?: unknown })?.recordingId === 'string' ? (job.data as { recordingId: string }).recordingId : null });
         }
       }
     } finally { this.processing = false; }
