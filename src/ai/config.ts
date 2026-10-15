@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import { z } from 'zod';
+import { revealSettings } from '../vault/secrets';
 
 export const speechProviders = ['whisper', 'mistral', 'deepgram', 'openai', 'assemblyai'] as const;
 export const textProviders = ['mistral', 'openai', 'anthropic', 'ollama'] as const;
@@ -30,7 +31,8 @@ export const aiSettingsInput = aiConfigSchema.extend({
 });
 export function readSettings(database: Database): Record<string, string> {
   if (!database.query("SELECT name FROM sqlite_master WHERE type='table' AND name='user_settings'").get()) return {};
-  return Object.fromEntries((database.query('SELECT key,value FROM user_settings').all() as {key: string; value: string}[]).map(row => [row.key, row.value]));
+  // Secret values are encrypted at rest (REL-06); callers always receive plaintext.
+  return revealSettings(Object.fromEntries((database.query('SELECT key,value FROM user_settings').all() as {key: string; value: string}[]).map(row => [row.key, row.value])));
 }
 export function aiConfigFromSettings(values: Record<string, string>): AiConfig {
   // Legacy engine/key settings remain valid; all new routing is explicit.

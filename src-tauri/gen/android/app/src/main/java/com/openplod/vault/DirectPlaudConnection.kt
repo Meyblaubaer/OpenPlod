@@ -71,6 +71,7 @@ class DirectPlaudConnection(private val transport: DirectPlaudTransport, private
         val original = File(directory, "$stem.plaud")
         val part = File(directory, "$stem.part")
         var tailVerified = original.length() == session.size
+        var tail = -1
         if (!tailVerified) RandomAccessFile(part, "rw").use { file ->
             // Keep a contiguous, fsynced prefix. Re-request the final byte to require a fresh transfer tail.
             val offset = minOf(file.length(), session.size - 1)
@@ -86,7 +87,7 @@ class DirectPlaudConnection(private val transport: DirectPlaudTransport, private
                         require(bytes.size >= if (op == 28) 8 else 9) { "Truncated download control." }
                         require(bytes.u32(3) == session.sessionId) { "Recording transfer mismatch." }
                         if (op == 28) { require(!head && bytes.u8(7) == 0) { "Plaud rejected the download range." }; head = true }
-                        else { require(head && position == session.size) { "Incomplete recording transfer." }; tailVerified = true }
+                        else { require(head && position == session.size) { "Incomplete recording transfer." }; tail = bytes.u16(7); tailVerified = true }
                     } else if (bytes.isNotEmpty() && bytes.u8(0) == 2) {
                         require(head && bytes.size >= 10 && bytes.u32(1) == session.sessionId) { "Invalid recording data." }
                         val at = bytes.u32(5); val length = bytes.u8(9)
@@ -99,7 +100,17 @@ class DirectPlaudConnection(private val transport: DirectPlaudTransport, private
                 check(tailVerified) { "Download timed out. Partial audio retained for retry." }
             } finally { file.fd.sync() }
         }
-        if (!original.isFile) check(part.renameTo(original)) { "Could not retain original bytes." }
+        if (!original.isFile) {
+            // REL-02: record the tail checksum outcome. Only a confirmed algorithm can reject a transfer,
+            // and even then the received bytes are kept aside instead of deleted.
+            val evaluation = DirectPlaudChecksum.evaluate(part.readBytes(), tail)
+            RandomAccessFile(File(directory, "$stem.tail.json"), "rw").use { it.setLength(0); it.write(evaluation.toString().toByteArray()); it.fd.sync() }
+            if (evaluation.getString("status") == "mismatch") {
+                check(part.renameTo(File(directory, "$stem.mismatch-${System.currentTimeMillis()}.part"))) { "Could not retain mismatched bytes." }
+                error("Plaud transfer checksum mismatch. Received bytes were kept; retry the transfer.")
+            }
+            check(part.renameTo(original)) { "Could not retain original bytes." }
+        }
         val privateKey = decode("privateKey")
         val audio = try { DirectPlaudProtocol.decode(original.readBytes()) { DirectPlaudProtocol.unwrap(privateKey, it) } } finally { privateKey.fill(0) }
         check(list().any { it.sessionId == session.sessionId && it.size == session.size }) { "Source retention could not be verified." }

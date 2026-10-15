@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { decryptSecret } from '../vault/secrets';
 import { z } from 'zod';
 import { OrganizerError, OrganizerStore } from './store';
 import { identifier, markdown, noteTitle } from './schemas';
@@ -22,7 +23,7 @@ export class DocumentGenerationService {
   private running = new Set<string>();
   constructor(private store: OrganizerStore, private fetcher: GenerationFetch = fetch, private key = () => {
     const row = store.database.query('SELECT value FROM user_settings WHERE key=?').get('mistralApiKey') as { value: string } | null;
-    return row?.value || process.env.MISTRAL_API_KEY;
+    return decryptSecret('mistralApiKey', row?.value) || process.env.MISTRAL_API_KEY;
   }, private timeoutMs = 90000) {}
 
   private row(id: string): Row {

@@ -1,6 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import { sqlite } from '../db/client';
 import { readAiConfig } from '../ai/config';
+import { registerPurgeHook } from '../library/purge-hooks';
 
 export interface Job<T = unknown> {
   id: string; type: string; data: T; status: 'pending' | 'running' | 'complete' | 'failed' | 'cancelled';
@@ -46,7 +47,8 @@ export class JobQueue {
       this.jobs.push(job);
     }
   }
-  private persist(job: Job) { this.database.query('INSERT INTO processing_jobs VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(job.id, JSON.stringify(job)); }
+  private forgotten = new Set<string>();
+  private persist(job: Job) { if (this.forgotten.has(job.id)) return; this.database.query('INSERT INTO processing_jobs VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(job.id, JSON.stringify(job)); }
   register<T>(type: string, handler: JobHandler<T>) { this.handlers.set(type, handler); queueMicrotask(() => { void this.processNext(); }); }
   async add<T>(type: string, data: T, priority = 0): Promise<Job<T>> {
     const input = data as Record<string, unknown>;
@@ -105,6 +107,14 @@ export class JobQueue {
       }
     } finally { this.processing = false; }
   }
+  /** REL-04: drops every job (and its persisted payload) for a purged recording, aborting any still running. */
+  forgetRecording(recordingId: string) {
+    const removed = this.jobs.filter(job => (job.data as { recordingId?: unknown })?.recordingId === recordingId);
+    for (const job of removed) { this.forgotten.add(job.id); this.controllers.get(job.id)?.abort(); }
+    this.jobs = this.jobs.filter(job => !removed.includes(job));
+    if (removed.length) this.database.query('DELETE FROM processing_jobs WHERE id IN (SELECT value FROM json_each(?))').run(JSON.stringify(removed.map(job => job.id)));
+    return removed.length;
+  }
   getJob(id: string) { return this.jobs.find(job => job.id === id); }
   /** The queued or running job of this type for a recording, if any. */
   activeJob(type: string, recordingId: string) {
@@ -116,3 +126,4 @@ export class JobQueue {
   getStats(): Record<Job['status'] | 'total', number> { return { total: this.jobs.length, ...Object.fromEntries(['pending', 'running', 'complete', 'failed', 'cancelled'].map(status => [status, this.jobs.filter(job => job.status === status).length])) } as Record<Job['status'] | 'total', number>; }
 }
 export const jobQueue = new JobQueue(sqlite);
+registerPurgeHook({ name: 'job-queue', afterCommit: ({ recordingId }) => { jobQueue.forgetRecording(recordingId); } });

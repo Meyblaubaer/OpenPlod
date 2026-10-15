@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { decryptSecret } from '../vault/secrets';
 import { z } from 'zod';
 import { OrganizerError, OrganizerStore } from './store';
 import { textSelection } from '../ai/config';
@@ -20,7 +21,7 @@ export class RecordingAi {
   private running = new Set<string>();
   constructor(private store: OrganizerStore, private fetcher: typeof fetch = fetch, private key = () => {
     const row = store.database.query("SELECT value FROM user_settings WHERE key='mistralApiKey'").get() as { value: string } | null;
-    return row?.value || process.env.MISTRAL_API_KEY;
+    return decryptSecret('mistralApiKey', row?.value) || process.env.MISTRAL_API_KEY;
   }) {
     store.database.exec(`CREATE TABLE IF NOT EXISTS ai_turns (
       id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, request_hash TEXT NOT NULL, recording_ids TEXT NOT NULL,
