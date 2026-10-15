@@ -7,6 +7,7 @@ import {
   captureStatus, cleanupStoredCaptures, isVerifiedStored, KEEP_DAY_CHOICES, listCaptures, readKeepDays,
   removeStoredCapture, summarizeOutbox, writeKeepDays, type PendingCapture,
 } from '@/lib/recording-outbox'
+import { formatDate, t, tn } from '@/i18n'
 import './outbox.css'
 
 /**
@@ -23,7 +24,7 @@ export function OutboxPanel({ fromMobile, refreshKey = 0 }: { fromMobile: boolea
 
   const reload = useCallback(async () => {
     try { setCaptures(await listCaptures()) }
-    catch { setCaptures([]); setMessage('The local outbox could not be read.') }
+    catch { setCaptures([]); setMessage(t('The local outbox could not be read.')) }
   }, [])
 
   useEffect(() => {
@@ -35,10 +36,10 @@ export function OutboxPanel({ fromMobile, refreshKey = 0 }: { fromMobile: boolea
     setActive(current => ({ ...current, [capture.id]: 0 }))
     try {
       await deliverCapture(capture, fromMobile, (sent, total) => setActive(current => ({ ...current, [capture.id]: total ? sent / total : 0 })))
-      setMessage(`"${capture.title}" is stored in the desktop vault.`)
+      setMessage(t('"{title}" is stored in the desktop vault.', { title: capture.title }))
       await cleanupStoredCaptures(keepDays).catch(() => 0)
     } catch (error) {
-      setMessage(`Local recording retained. ${error instanceof Error ? error.message : 'Retry when the desktop is reachable.'}`)
+      setMessage(t('Local recording retained. {error}', { error: error instanceof Error ? error.message : t('Retry when the desktop is reachable.') }))
     } finally {
       setActive(current => { const next = { ...current }; delete next[capture.id]; return next })
       await reload()
@@ -47,8 +48,8 @@ export function OutboxPanel({ fromMobile, refreshKey = 0 }: { fromMobile: boolea
 
   const remove = async (capture: PendingCapture) => {
     setConfirming(null)
-    if (await removeStoredCapture(capture.id)) setMessage(`Removed the local copy of "${capture.title}".`)
-    else setMessage('This recording is not verified as stored on the desktop, so it was kept.')
+    if (await removeStoredCapture(capture.id)) setMessage(t('Removed the local copy of "{title}".', { title: capture.title }))
+    else setMessage(t('This recording is not verified as stored on the desktop, so it was kept.'))
     await reload()
   }
 
@@ -56,10 +57,10 @@ export function OutboxPanel({ fromMobile, refreshKey = 0 }: { fromMobile: boolea
   const summary = summarizeOutbox(captures)
   return <section className="outbox" aria-labelledby="outbox-title">
     <header>
-      <div><Inbox /><div><h2 id="outbox-title">Outbox</h2><p>{summary.waiting + summary.failed} waiting · {summary.stored} stored · {formatBytes(summary.bytes)} on this device</p></div></div>
-      <label className="outbox-keep">Keep stored copies
+      <div><Inbox /><div><h2 id="outbox-title">{t('Outbox')}</h2><p>{t('{waiting} waiting · {stored} stored · {size} on this device', { waiting: summary.waiting + summary.failed, stored: summary.stored, size: formatBytes(summary.bytes) })}</p></div></div>
+      <label className="outbox-keep">{t('Keep stored copies')}
         <select value={keepDays} onChange={event => { const days = Number(event.target.value); writeKeepDays(days); setKeepDays(days) }}>
-          {KEEP_DAY_CHOICES.map(days => <option key={days} value={days}>{days === 0 ? 'Remove when stored' : `${days} day${days === 1 ? '' : 's'}`}</option>)}
+          {KEEP_DAY_CHOICES.map(days => <option key={days} value={days}>{days === 0 ? t('Remove when stored') : tn(days, '{count} day', '{count} days')}</option>)}
         </select>
       </label>
     </header>
@@ -72,18 +73,18 @@ export function OutboxPanel({ fromMobile, refreshKey = 0 }: { fromMobile: boolea
         return <li key={capture.id} className={`outbox-item ${status}`}>
           <div className="outbox-main">
             <strong>{capture.title}</strong>
-            <span>{new Date(capture.recordedAt).toLocaleString()} · {formatBytes(capture.blob?.size ?? 0)}</span>
-            <span className="outbox-status" role="status">{sending ? `Sending ${Math.round(progress * 100)}%`
-              : status === 'stored' ? `Stored on desktop ${capture.acknowledgement ? new Date(capture.acknowledgement.storedAt).toLocaleDateString() : ''}`
-              : status === 'failed' ? 'Not delivered' : 'Waiting for desktop'}
-              {(capture.retryCount ?? 0) > 0 && !verified ? ` · ${capture.retryCount} failed attempt${capture.retryCount === 1 ? '' : 's'}` : ''}</span>
+            <span>{formatDate(capture.recordedAt)} · {formatBytes(capture.blob?.size ?? 0)}</span>
+            <span className="outbox-status" role="status">{sending ? t('Sending {percent}%', { percent: Math.round(progress * 100) })
+              : status === 'stored' ? capture.acknowledgement ? t('Stored on desktop {date}', { date: formatDate(capture.acknowledgement.storedAt, { dateStyle: 'short' }) }) : t('Stored on desktop')
+              : status === 'failed' ? t('Not delivered') : t('Waiting for desktop')}
+              {(capture.retryCount ?? 0) > 0 && !verified ? ` · ${tn(capture.retryCount ?? 0, '{count} failed attempt', '{count} failed attempts')}` : ''}</span>
             {capture.lastError && !verified && !sending && <span className="outbox-error">{capture.lastError}</span>}
           </div>
           <div className="outbox-actions">
-            {verified ? <CheckCircle2 aria-label="Verified on desktop" /> : <IconButton label="Retry upload" disabled={sending} onClick={() => void retry(capture)}>{sending ? <Loader2 className="animate-spin" /> : <RefreshCw />}</IconButton>}
+            {verified ? <CheckCircle2 aria-label={t('Verified on desktop')} /> : <IconButton label={t('Retry upload')} disabled={sending} onClick={() => void retry(capture)}>{sending ? <Loader2 className="animate-spin" /> : <RefreshCw />}</IconButton>}
             {verified && (confirming === capture.id
-              ? <span className="outbox-confirm"><Button size="sm" variant="destructive" onClick={() => void remove(capture)}>Remove copy</Button><Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>Keep</Button></span>
-              : <IconButton label="Remove local copy" onClick={() => setConfirming(capture.id)}><Trash2 /></IconButton>)}
+              ? <span className="outbox-confirm"><Button size="sm" variant="destructive" onClick={() => void remove(capture)}>{t('Remove copy')}</Button><Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>{t('Keep')}</Button></span>
+              : <IconButton label={t('Remove local copy')} onClick={() => setConfirming(capture.id)}><Trash2 /></IconButton>)}
           </div>
         </li>
       })}
@@ -93,8 +94,8 @@ export function OutboxPanel({ fromMobile, refreshKey = 0 }: { fromMobile: boolea
 }
 
 function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+  if (bytes < 1024) return t('{value} B', { value: bytes })
+  if (bytes < 1024 * 1024) return t('{value} KB', { value: (bytes / 1024).toFixed(0) })
+  if (bytes < 1024 * 1024 * 1024) return t('{value} MB', { value: (bytes / 1024 / 1024).toFixed(1) })
+  return t('{value} GB', { value: (bytes / 1024 / 1024 / 1024).toFixed(2) })
 }

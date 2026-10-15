@@ -3,7 +3,8 @@ import { AlertCircle, Check, FileText, Loader2, RotateCcw, Speech, X } from '@/c
 import { Button } from '@/components/ui/button'
 import { api, type BatchEstimate, type BatchJob, type DocumentBatchEstimate, type Recording } from '@/lib/api'
 import { describeEstimate } from '@/lib/transcription'
-import { DOCUMENT_STYLE_LABEL, DOCUMENT_STYLES, notesApi, type DocumentStyle, type NoteFolder } from '@/lib/notes-api'
+import { documentStyleLabel, DOCUMENT_STYLES, notesApi, type DocumentStyle, type NoteFolder } from '@/lib/notes-api'
+import { t, tn } from '@/i18n'
 import './batch-transcribe.css'
 
 /**
@@ -50,7 +51,7 @@ export function BatchTranscribe({ recordings, onFinished }: {
   const activeMode: Mode = mode === 'document' ? (transcribed.length > 0 ? 'document' : 'transcribe') : (candidates.length > 0 ? 'transcribe' : 'document')
 
   const fail = (failure: unknown) => {
-    if (mounted.current) setError(failure instanceof Error ? failure.message : 'The batch could not run.')
+    if (mounted.current) setError(failure instanceof Error ? failure.message : t('The batch could not run.'))
   }
 
   // Poll while a batch is active; stop as soon as it settles.
@@ -104,21 +105,21 @@ export function BatchTranscribe({ recordings, onFinished }: {
         <div className="batch-bar">
           <span>
             {activeMode === 'transcribe'
-              ? `${candidates.length} recording${candidates.length === 1 ? '' : 's'} without a transcript`
-              : `${transcribed.length} transcribed recording${transcribed.length === 1 ? '' : 's'}`}
+              ? tn(candidates.length, '{count} recording without a transcript', '{count} recordings without a transcript')
+              : tn(transcribed.length, '{count} transcribed recording', '{count} transcribed recordings')}
           </span>
           {candidates.length > 0 && transcribed.length > 0 && (
-            <span className="batch-modes" role="radiogroup" aria-label="Batch action">
+            <span className="batch-modes" role="radiogroup" aria-label={t('Batch action')}>
               <button type="button" role="radio" aria-checked={activeMode === 'transcribe'} data-active={activeMode === 'transcribe'}
-                onClick={() => setMode('transcribe')}>Transcribe</button>
+                onClick={() => setMode('transcribe')}>{t('Transcribe')}</button>
               <button type="button" role="radio" aria-checked={activeMode === 'document'} data-active={activeMode === 'document'}
-                onClick={() => setMode('document')}>Create documents</button>
+                onClick={() => setMode('document')}>{t('Create documents')}</button>
             </span>
           )}
           {activeMode === 'transcribe'
             ? (
               <Button size="sm" variant="outline" disabled={busy} onClick={() => void check()}>
-                {busy ? <Loader2 className="batch-spin" /> : <Speech />}Transcribe all
+                {busy ? <Loader2 className="batch-spin" /> : <Speech />}{t('Transcribe all')}
               </Button>
             )
             : (
@@ -129,7 +130,7 @@ export function BatchTranscribe({ recordings, onFinished }: {
                   catch (failure) { fail(failure) }
                   finally { if (mounted.current) setBusy(false) }
                 })()}>
-                {busy ? <Loader2 className="batch-spin" /> : <FileText />}Create documents…
+                {busy ? <Loader2 className="batch-spin" /> : <FileText />}{t('Create documents…')}
               </Button>
             )}
         </div>
@@ -137,23 +138,23 @@ export function BatchTranscribe({ recordings, onFinished }: {
 
       {!job && estimate && (
         <div className="batch-bar">
-          <span>{candidates.length} recording{candidates.length === 1 ? '' : 's'} without a transcript</span>
+          <span>{tn(candidates.length, '{count} recording without a transcript', '{count} recordings without a transcript')}</span>
           <span className="batch-confirm">
             {estimate.usesCloudProvider
-              ? `This sends ${estimate.wouldRun} recording${estimate.wouldRun === 1 ? '' : 's'} to ${estimate.provider}, which may be billed.`
-              : `This runs ${estimate.wouldRun} recording${estimate.wouldRun === 1 ? '' : 's'} locally with ${estimate.provider ?? 'the configured engine'}.`}
+              ? tn(estimate.wouldRun, 'This sends {count} recording to {provider}, which may be billed.', 'This sends {count} recordings to {provider}, which may be billed.', { provider: estimate.provider ?? '' })
+              : tn(estimate.wouldRun, 'This runs {count} recording locally with {provider}.', 'This runs {count} recordings locally with {provider}.', { provider: estimate.provider ?? t('the configured engine') })}
             {estimate.estimatedCost && ` ${describeEstimate(estimate.estimatedCost)}`}
           </span>
           {estimate.estimatedCost?.confirmationRequired && (
             <label className="batch-confirm">
               <input type="checkbox" checked={costAccepted} disabled={busy} onChange={event => setCostAccepted(event.target.checked)} />
-              {' '}{estimate.estimatedCost.reasons.join(' ')} I accept this estimated cost.
+              {' '}{estimate.estimatedCost.reasons.join(' ')} {t('I accept this estimated cost.')}
             </label>
           )}
           <Button size="sm" disabled={busy || Boolean(estimate.estimatedCost?.confirmationRequired && !costAccepted)} onClick={() => void start()}>
-            {busy ? <Loader2 className="batch-spin" /> : <Check />}Start
+            {busy ? <Loader2 className="batch-spin" /> : <Check />}{t('Start')}
           </Button>
-          <Button size="sm" variant="ghost" disabled={busy} onClick={reset}><X />Cancel</Button>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={reset}><X />{t('Cancel')}</Button>
         </div>
       )}
 
@@ -178,22 +179,22 @@ export function BatchTranscribe({ recordings, onFinished }: {
         <div className="batch-progress">
           <div className="batch-bar">
             <span>
-              {job.active ? (job.kind === 'document' ? 'Creating documents' : 'Transcribing') : 'Batch finished'}: {job.summary.complete} done
-              {job.summary.failed > 0 && `, ${job.summary.failed} failed`}
-              {job.summary.cancelled > 0 && `, ${job.summary.cancelled} cancelled`}
-              {' '}of {job.summary.total}
+              {job.active ? (job.kind === 'document' ? t('Creating documents') : t('Transcribing')) : t('Batch finished')}: {tn(job.summary.complete, '{count} done', '{count} done')}
+              {job.summary.failed > 0 && `, ${tn(job.summary.failed, '{count} failed', '{count} failed')}`}
+              {job.summary.cancelled > 0 && `, ${tn(job.summary.cancelled, '{count} cancelled', '{count} cancelled')}`}
+              {' '}{t('of {total}', { total: job.summary.total })}
             </span>
             {job.active
-              ? <Button size="sm" variant="ghost" onClick={() => void api.cancelBatch(job.id).catch(() => {})}><X />Cancel</Button>
+              ? <Button size="sm" variant="ghost" onClick={() => void api.cancelBatch(job.id).catch(() => {})}><X />{t('Cancel')}</Button>
               : (
                 <>
                   {job.summary.failed > 0 && (
                     <Button size="sm" variant="outline" disabled={busy}
                       onClick={() => void (job.kind === 'document' ? retryDocuments(job.id) : start(job.id))}>
-                      <RotateCcw />Retry {job.summary.failed} failed
+                      <RotateCcw />{t('Retry {count} failed', { count: job.summary.failed })}
                     </Button>
                   )}
-                  <Button size="sm" variant="ghost" onClick={() => { setJob(null); reset() }}><X />Dismiss</Button>
+                  <Button size="sm" variant="ghost" onClick={() => { setJob(null); reset() }}><X />{t('Dismiss')}</Button>
                 </>
               )}
           </div>
@@ -201,7 +202,7 @@ export function BatchTranscribe({ recordings, onFinished }: {
             <ul className="batch-failures">
               {job.items.filter(item => item.state === 'failed').map(item => (
                 <li key={item.recordingId}>
-                  {titles.get(item.recordingId) ?? <code>{item.recordingId.slice(0, 8)}</code>}: {item.error ?? 'Failed.'}
+                  {titles.get(item.recordingId) ?? <code>{item.recordingId.slice(0, 8)}</code>}: {item.error ?? t('Failed.')}
                 </li>
               ))}
             </ul>
@@ -236,7 +237,7 @@ function DocumentBatchSetup({ recordings, estimate, busy, onCancel, onStart }: {
   }, [])
 
   const count = selected.size
-  const folderName = folderId ? folders.find(folder => folder.id === folderId)?.name ?? 'the chosen folder' : 'Notes (no folder)'
+  const folderName = folderId ? folders.find(folder => folder.id === folderId)?.name ?? t('the chosen folder') : t('Notes (no folder)')
   const toggle = (id: string) => setSelected(current => {
     const next = new Set(current)
     if (next.has(id)) next.delete(id); else next.add(id)
@@ -244,26 +245,26 @@ function DocumentBatchSetup({ recordings, estimate, busy, onCancel, onStart }: {
   })
 
   return (
-    <div className="batch-documents" aria-label="Create documents from transcripts">
+    <div className="batch-documents" aria-label={t('Create documents from transcripts')}>
       <div className="batch-documents-fields">
-        <label><span>Template</span>
+        <label><span>{t('Template')}</span>
           <select value={style} onChange={event => setStyle(event.target.value as DocumentStyle)} disabled={busy}>
-            {DOCUMENT_STYLES.map(value => <option key={value} value={value}>{DOCUMENT_STYLE_LABEL[value]}</option>)}
+            {DOCUMENT_STYLES.map(value => <option key={value} value={value}>{documentStyleLabel(value)}</option>)}
           </select>
         </label>
-        <label><span>Save to</span>
+        <label><span>{t('Save to')}</span>
           <select value={folderId} onChange={event => setFolderId(event.target.value)} disabled={busy}>
-            <option value="">No folder</option>
+            <option value="">{t('No folder')}</option>
             {folders.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
           </select>
         </label>
-        <label className="batch-documents-wide"><span>Instructions (optional)</span>
+        <label className="batch-documents-wide"><span>{t('Instructions (optional)')}</span>
           <textarea value={instructions} onChange={event => setInstructions(event.target.value)} maxLength={2000} rows={2} disabled={busy}
-            placeholder="Writing preferences applied to every document" />
+            placeholder={t('Writing preferences applied to every document')} />
         </label>
       </div>
       <fieldset className="batch-documents-list" disabled={busy}>
-        <legend>{count} of {recordings.length} selected</legend>
+        <legend>{t('{count} of {total} selected', { count, total: recordings.length })}</legend>
         {recordings.map(row => (
           <label key={row.id}><input type="checkbox" checked={selected.has(row.id)} onChange={() => toggle(row.id)} />{row.title}</label>
         ))}
@@ -273,17 +274,17 @@ function DocumentBatchSetup({ recordings, estimate, busy, onCancel, onStart }: {
         : (
           <p className="batch-confirm">
             {estimate.usesCloudProvider
-              ? `This sends the transcript text of ${count} recording${count === 1 ? '' : 's'} to ${estimate.provider} (${estimate.model}), which may be billed per token. Cost is not estimated here.`
-              : `This sends the transcript text of ${count} recording${count === 1 ? '' : 's'} to your local Ollama model ${estimate.model}.`}
-            {` Each creates a new note in ${folderName}; existing notes are not changed.`}
+              ? tn(count, 'This sends the transcript text of {count} recording to {provider} ({model}), which may be billed per token. Cost is not estimated here.', 'This sends the transcript text of {count} recordings to {provider} ({model}), which may be billed per token. Cost is not estimated here.', { provider: estimate.provider, model: estimate.model })
+              : tn(count, 'This sends the transcript text of {count} recording to your local Ollama model {model}.', 'This sends the transcript text of {count} recordings to your local Ollama model {model}.', { model: estimate.model })}
+            {` ${t('Each creates a new note in {folder}; existing notes are not changed.', { folder: folderName })}`}
           </p>
         )}
       <div className="batch-bar batch-bar--plain">
         <Button size="sm" disabled={busy || count === 0 || Boolean(estimate.providerError)}
           onClick={() => void onStart(recordings.filter(row => selected.has(row.id)).map(row => row.id), { style, instructions: instructions.trim(), folderId: folderId || null })}>
-          {busy ? <Loader2 className="batch-spin" /> : <Check />}Create {count} document{count === 1 ? '' : 's'}
+          {busy ? <Loader2 className="batch-spin" /> : <Check />}{tn(count, 'Create {count} document', 'Create {count} documents')}
         </Button>
-        <Button size="sm" variant="ghost" disabled={busy} onClick={onCancel}><X />Cancel</Button>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={onCancel}><X />{t('Cancel')}</Button>
       </div>
     </div>
   )

@@ -7,27 +7,28 @@ import { api } from "@/lib/api";
 import { apiUrl, authenticatedHeaders } from "@/lib/runtime";
 import { knowledgeApi, recordingLink } from "@/lib/knowledge";
 import { formatDuration } from "@/lib/utils";
+import { t } from "@/i18n";
 import "./knowledge.css";
 
 type Result = { id: string; title: string; kind: string; to: string; detail?: string };
 /** `keyword`: titles and words; `passages`: hybrid search returning cited passages (KB-04). */
 type SearchMode = "keyword" | "passages";
 type Action = { id: string; label: string; hint: string; icon: typeof Home; to?: string; event?: string; keywords: string };
-/** Quick actions shown before and alongside search results. */
-const ACTIONS: Action[] = [
-  { id: "home", label: "Home", hint: "Go to", icon: Home, to: "/", keywords: "dashboard start" },
-  { id: "recordings", label: "Recordings", hint: "Go to", icon: FolderHeart, to: "/recordings", keywords: "library audio" },
-  { id: "transcripts", label: "Transcripts", hint: "Go to", icon: FileText, to: "/transcripts", keywords: "text studio" },
-  { id: "documents", label: "Documents", hint: "Go to", icon: NotebookPen, to: "/notes", keywords: "notes markdown obsidian" },
-  { id: "chat", label: "AI Chat", hint: "Go to", icon: MessageSquare, to: "/ai", keywords: "ask question conversation" },
-  { id: "import", label: "Import audio files", hint: "Action", icon: Upload, to: "/import", keywords: "upload mp3 m4a wav" },
-  { id: "record", label: "Record with the microphone", hint: "Action", icon: Mic, to: "/record", keywords: "capture new recording" },
-  { id: "plaud", label: "Plaud device", hint: "Action", icon: Bluetooth, to: "/devices", keywords: "bluetooth sync note pro" },
-  { id: "android", label: "Pair an Android phone", hint: "Action", icon: Smartphone, to: "/android", keywords: "mobile qr" },
-  { id: "profiles", label: "Transcription profiles", hint: "Settings", icon: AudioLines, to: "/settings#profiles", keywords: "prompt vocabulary model whisper voxtral" },
-  { id: "settings", label: "Settings", hint: "Go to", icon: Settings, to: "/settings", keywords: "ai providers keys privacy" },
-  { id: "developer", label: "API and MCP", hint: "Go to", icon: Workflow, to: "/developer", keywords: "developer token claude" },
-  { id: "setup", label: "Run the setup guide", hint: "Action", icon: Rocket, event: ONBOARDING_EVENT, keywords: "onboarding welcome start" },
+/** Quick actions shown before and alongside search results; a function so labels follow the current language. */
+const quickActions = (): Action[] => [
+  { id: "home", label: t("Home"), hint: t("Go to"), icon: Home, to: "/", keywords: "dashboard start" },
+  { id: "recordings", label: t("Recordings"), hint: t("Go to"), icon: FolderHeart, to: "/recordings", keywords: "library audio" },
+  { id: "transcripts", label: t("Transcripts"), hint: t("Go to"), icon: FileText, to: "/transcripts", keywords: "text studio" },
+  { id: "documents", label: t("Documents"), hint: t("Go to"), icon: NotebookPen, to: "/notes", keywords: "notes markdown obsidian" },
+  { id: "chat", label: t("AI Chat"), hint: t("Go to"), icon: MessageSquare, to: "/ai", keywords: "ask question conversation" },
+  { id: "import", label: t("Import audio files"), hint: t("Action"), icon: Upload, to: "/import", keywords: "upload mp3 m4a wav" },
+  { id: "record", label: t("Record with the microphone"), hint: t("Action"), icon: Mic, to: "/record", keywords: "capture new recording" },
+  { id: "plaud", label: t("Plaud device"), hint: t("Action"), icon: Bluetooth, to: "/devices", keywords: "bluetooth sync note pro" },
+  { id: "android", label: t("Pair an Android phone"), hint: t("Action"), icon: Smartphone, to: "/android", keywords: "mobile qr" },
+  { id: "profiles", label: t("Transcription profiles"), hint: t("Settings"), icon: AudioLines, to: "/settings#profiles", keywords: "prompt vocabulary model whisper voxtral" },
+  { id: "settings", label: t("Settings"), hint: t("Go to"), icon: Settings, to: "/settings", keywords: "ai providers keys privacy" },
+  { id: "developer", label: t("API and MCP"), hint: t("Go to"), icon: Workflow, to: "/developer", keywords: "developer token claude" },
+  { id: "setup", label: t("Run the setup guide"), hint: t("Action"), icon: Rocket, event: ONBOARDING_EVENT, keywords: "onboarding welcome start" },
 ];
 type Item = { kind: "action"; key: string; action: Action } | { kind: "result"; key: string; row: Result };
 const matches = (action: Action, query: string) => {
@@ -66,16 +67,16 @@ export function WorkspaceSearch() {
         try {
           const result = await knowledgeApi.search(query.trim(), { mode: "hybrid", limit: 12, signal: abort.signal });
           if (abort.signal.aborted) return;
-          setNote(result.embedding.kind === "lexical" ? "Lexical index (built-in, offline)" : `${result.embedding.kind === "local" ? "Local" : "Cloud"} embeddings: ${result.embedding.model}`);
+          setNote(result.embedding.kind === "lexical" ? t("Lexical index (built-in, offline)") : result.embedding.kind === "local" ? t("Local embeddings: {model}", { model: result.embedding.model }) : t("Cloud embeddings: {model}", { model: result.embedding.model }));
           setRows(result.passages.map((passage) => passage.sourceType === "transcript" && passage.recordingId
             ? {
                 id: passage.id,
-                title: passage.recordingTitle?.replace(/\.[^.]+$/, "") || "Recording",
-                kind: passage.startTime === null ? "Passage" : `Passage ${formatDuration(passage.startTime)}`,
+                title: passage.recordingTitle?.replace(/\.[^.]+$/, "") || t("Recording"),
+                kind: passage.startTime === null ? t("Passage") : t("Passage {time}", { time: formatDuration(passage.startTime) }),
                 to: recordingLink(passage.recordingId, passage.startTime, passage.versionId),
                 detail: passage.text.slice(0, 180),
               }
-            : { id: passage.id, title: passage.documentTitle || "Document", kind: "Document passage", to: `/notes?document=${passage.documentId}`, detail: passage.text.slice(0, 180) }));
+            : { id: passage.id, title: passage.documentTitle || t("Document"), kind: t("Document passage"), to: `/notes?document=${passage.documentId}`, detail: passage.text.slice(0, 180) }));
         } catch (e) {
           if (!abort.signal.aborted) setError((e as Error).message);
         } finally {
@@ -90,7 +91,7 @@ export function WorkspaceSearch() {
             apiUrl(`/recordings?limit=20&search=${encodeURIComponent(query)}`),
             { headers, signal: abort.signal },
           ).then(async (r) => {
-            if (!r.ok) throw new Error("Recording search unavailable.");
+            if (!r.ok) throw new Error(t("Recording search unavailable."));
             return r.json();
           }),
           api.search(query, abort.signal),
@@ -98,7 +99,7 @@ export function WorkspaceSearch() {
             apiUrl(`/v1/documents?q=${encodeURIComponent(query)}&limit=20`),
             { headers, signal: abort.signal },
           ).then(async (r) => {
-            if (!r.ok) throw new Error("Document search unavailable.");
+            if (!r.ok) throw new Error(t("Document search unavailable."));
             return r.json();
           }),
         ]);
@@ -106,7 +107,7 @@ export function WorkspaceSearch() {
           (r: { id: string; originalFilename: string }) => ({
             id: r.id,
             title: r.originalFilename,
-            kind: "Recording",
+            kind: t("Recording"),
             to: `/recording/${r.id}`,
           }),
         );
@@ -115,14 +116,14 @@ export function WorkspaceSearch() {
             results.push({
               id: row.recordingId,
               title: row.recordingTitle,
-              kind: "Transcript",
+              kind: t("Transcript"),
               to: `/recording/${row.recordingId}`,
             });
         for (const row of documents.data.documents)
           results.push({
             id: row.id,
             title: row.title,
-            kind: "Document",
+            kind: t("Document"),
             to: `/notes?document=${row.id}`,
           });
         if (!abort.signal.aborted) setRows(results);
@@ -138,7 +139,8 @@ export function WorkspaceSearch() {
     };
   }, [query, open, mode]);
   const term = query.trim();
-  const actions = (term ? ACTIONS.filter((action) => matches(action, term)).slice(0, 5) : ACTIONS);
+  const allActions = quickActions();
+  const actions = (term ? allActions.filter((action) => matches(action, term)).slice(0, 5) : allActions);
   const visible: Item[] = [
     ...actions.map((action) => ({ kind: "action" as const, key: `action-${action.id}`, action })),
     ...(term.length >= 2 ? rows.map((row) => ({ kind: "result" as const, key: `${row.kind}-${row.id}`, row })) : []),
@@ -161,19 +163,19 @@ export function WorkspaceSearch() {
     >
       <Dialog.Trigger className="command-search">
         <Search />
-        <span>Search recordings, transcripts, documents...</span>
+        <span>{t("Search recordings, transcripts, documents...")}</span>
         <kbd>⌘ K</kbd>
       </Dialog.Trigger>
       <Dialog.Portal>
         <Dialog.Overlay className="command-overlay" />
         <Dialog.Content className="command-dialog" aria-describedby={undefined}>
-          <Dialog.Title className="sr-only">Search workspace</Dialog.Title>
+          <Dialog.Title className="sr-only">{t("Search workspace")}</Dialog.Title>
           <div className="command-input">
             <Search />
             <input
               autoFocus
-              aria-label="Search workspace"
-              placeholder="Search, or type a command…"
+              aria-label={t("Search workspace")}
+              placeholder={t("Search, or type a command…")}
               value={query}
               onKeyDown={(event) => {
                 if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -192,20 +194,20 @@ export function WorkspaceSearch() {
                 setLoading(e.target.value.trim().length >= 2);
               }}
             />
-            <div className="command-mode" role="radiogroup" aria-label="Search mode">
+            <div className="command-mode" role="radiogroup" aria-label={t("Search mode")}>
               {(["keyword", "passages"] as const).map((value) => (
                 <button key={value} type="button" role="radio" aria-checked={mode === value} onClick={() => { setMode(value); setRows([]); setActive(0); setLoading(query.trim().length >= 2); }}>
-                  {value === "keyword" ? "Keyword" : "Passages"}
+                  {value === "keyword" ? t("Keyword") : t("Passages")}
                 </button>
               ))}
             </div>
-            <Dialog.Close aria-label="Close search">
+            <Dialog.Close aria-label={t("Close search")}>
               <X />
             </Dialog.Close>
           </div>
-          <div className="command-results" role="listbox" aria-label="Commands and results">
+          <div className="command-results" role="listbox" aria-label={t("Commands and results")}>
             {visible.map((item, index) => {
-              const Icon = item.kind === "action" ? item.action.icon : item.row.kind === "Recording" ? FileAudio : FileText;
+              const Icon = item.kind === "action" ? item.action.icon : item.row.kind === t("Recording") ? FileAudio : FileText;
               const title = item.kind === "action" ? item.action.label : item.row.title;
               const kind = item.kind === "action" ? item.action.hint : item.row.kind;
               return (
@@ -231,7 +233,7 @@ export function WorkspaceSearch() {
             {error && <p role="alert">{error}</p>}
             {mode === "passages" && note && !loading && <p className="command-note">{note}</p>}
             {query.trim().length >= 2 && !loading && !rows.length && !error && !visible.length && (
-              <p>No results found.</p>
+              <p>{t("No results found.")}</p>
             )}
           </div>
         </Dialog.Content>

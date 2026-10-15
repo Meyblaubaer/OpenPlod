@@ -1,3 +1,4 @@
+import { t } from '@/i18n'
 export interface Recording {
   id: string
   title: string
@@ -512,7 +513,7 @@ async function fetchJSON<T>(url: string, opts?: RequestInit): Promise<T> {
 }
 
 export const speakerLabel = (speaker: number | string | null | undefined) =>
-  typeof speaker === 'string' ? speaker : speaker !== undefined && speaker !== null ? `Speaker ${speaker}` : 'Speaker'
+  typeof speaker === 'string' ? speaker : speaker !== undefined && speaker !== null ? t('Speaker {number}', { number: speaker }) : t('Speaker')
 
 /** Map backend recording shape to frontend Recording */
 function mapRecording(r: RawRecording): Recording {

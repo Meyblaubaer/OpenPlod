@@ -5,20 +5,21 @@ import { ArrowLeft, ArrowRight, AudioLines, Bluetooth, Check, CheckCircle2, Clou
 import { Button } from '@/components/ui/button'
 import { Brand } from '@/components/Brand'
 import { ONBOARDING_EVENT, aiSettingsApi, onboardingApi, profilesApi, type AiSettings, type OnboardingStatus, type ProfilePreset, type SpeechProvider } from '@/lib/ai-settings'
-import { LANGUAGES, configOf } from '@/lib/transcription'
+import { configOf, localizeLanguages } from '@/lib/transcription'
+import { LOCALES, setLocale, t, tn, useLocale } from '@/i18n'
 import { getRuntime } from '@/lib/runtime'
 import './onboarding.css'
 
-const STEPS = ['Welcome', 'Privacy', 'Transcription', 'Profile', 'Recordings'] as const
+const steps = () => [t('Welcome'), t('Privacy'), t('Transcription'), t('Profile'), t('Recordings')]
 const SPEECH: SpeechProvider[] = ['whisper', 'mistral', 'openai', 'deepgram', 'assemblyai']
-const BLURB: Record<SpeechProvider, string> = {
-  whisper: 'Runs on this computer. Needs whisper.cpp and a model file.',
-  mistral: 'Voxtral: fast, multilingual, strong in French.',
-  openai: 'Whisper and GPT-4o transcribe; accepts a context prompt.',
-  deepgram: 'Nova models with speaker labels and key terms.',
-  assemblyai: 'Universal model with speaker labels and word boost.',
-}
-const message = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Nothing was changed.'
+const blurb = (): Record<SpeechProvider, string> => ({
+  whisper: t('Runs on this computer. Needs whisper.cpp and a model file.'),
+  mistral: t('Voxtral: fast, multilingual, strong in French.'),
+  openai: t('Whisper and GPT-4o transcribe; accepts a context prompt.'),
+  deepgram: t('Nova models with speaker labels and key terms.'),
+  assemblyai: t('Universal model with speaker labels and word boost.'),
+})
+const message = (error: unknown) => error instanceof Error ? error.message : t('Something went wrong. Nothing was changed.')
 
 /** Shows the first-run guide until it is finished or skipped, and again on request. */
 export function OnboardingGate() {
@@ -43,6 +44,7 @@ function Onboarding({ onClose }: { onClose: () => void }) {
   const [key, setKey] = useState('')
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [checked, setChecked] = useState('')
   const mobile = getRuntime().mode === 'mobile'
+  const locale = useLocale()
 
   useEffect(() => {
     Promise.all([aiSettingsApi.get(), onboardingApi.status(), profilesApi.list()])
@@ -95,90 +97,93 @@ function Onboarding({ onClose }: { onClose: () => void }) {
       <Dialog.Content className="onboarding" aria-describedby="onboarding-step-description" onInteractOutside={event => event.preventDefault()}>
         <header className="onboarding-top">
           <Brand />
-          <ol className="onboarding-steps" aria-label="Setup progress">{STEPS.map((label, index) => <li key={label} data-state={index < step ? 'done' : index === step ? 'current' : 'todo'} aria-current={index === step ? 'step' : undefined}><span>{index < step ? <Check /> : index + 1}</span><em>{label}</em></li>)}</ol>
-          <Button variant="ghost" size="sm" disabled={busy} onClick={() => void finish(true)}>Skip setup</Button>
+          <ol className="onboarding-steps" aria-label={t('Setup progress')}>{steps().map((label, index) => <li key={label} data-state={index < step ? 'done' : index === step ? 'current' : 'todo'} aria-current={index === step ? 'step' : undefined}><span>{index < step ? <Check /> : index + 1}</span><em>{label}</em></li>)}</ol>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => void finish(true)}>{t('Skip setup')}</Button>
         </header>
 
         <div className="onboarding-body">
           {step === 0 && <section className="onboarding-hero">
             <span className="onboarding-badge"><Rocket />OpenPlod 1.0</span>
-            <Dialog.Title>Your recordings, your vault.</Dialog.Title>
-            <Dialog.Description id="onboarding-step-description">A two-minute setup: choose where audio is processed, pick a transcription model, and tell it what you usually record.</Dialog.Description>
+            <Dialog.Title>{t('Your recordings, your vault.')}</Dialog.Title>
+            <Dialog.Description id="onboarding-step-description">{t('A two-minute setup: choose where audio is processed, pick a transcription model, and tell it what you usually record.')}</Dialog.Description>
+            <div className="onboarding-language" style={{ display: 'flex', gap: 8, marginTop: 8 }} role="group" aria-label={t('Language')}>
+              {LOCALES.map(item => <Button key={item.id} type="button" size="sm" variant={locale === item.id ? 'default' : 'outline'} aria-pressed={locale === item.id} lang={item.id} onClick={() => setLocale(item.id)}>{item.label}</Button>)}
+            </div>
             <ul className="onboarding-promises">
-              <li><ShieldCheck /><div><strong>Audio stays on this computer</strong><span>Originals are never deleted or sent anywhere you did not choose.</span></div></li>
-              <li><AudioLines /><div><strong>Any speech model you trust</strong><span>Whisper.cpp offline, or Mistral, OpenAI, Deepgram, AssemblyAI with your own key.</span></div></li>
-              <li><NotebookPen /><div><strong>Markdown you own</strong><span>Transcripts become documents, chat answers cite exact timestamps, and your notes export to Obsidian.</span></div></li>
+              <li><ShieldCheck /><div><strong>{t('Audio stays on this computer')}</strong><span>{t('Originals are never deleted or sent anywhere you did not choose.')}</span></div></li>
+              <li><AudioLines /><div><strong>{t('Any speech model you trust')}</strong><span>{t('Whisper.cpp offline, or Mistral, OpenAI, Deepgram, AssemblyAI with your own key.')}</span></div></li>
+              <li><NotebookPen /><div><strong>{t('Markdown you own')}</strong><span>{t('Transcripts become documents, chat answers cite exact timestamps, and your notes export to Obsidian.')}</span></div></li>
             </ul>
           </section>}
 
           {step === 1 && <section>
-            <Dialog.Title>Where should AI run?</Dialog.Title>
-            <Dialog.Description id="onboarding-step-description">You can change this any time in Settings. Local only blocks every cloud call, including fallbacks.</Dialog.Description>
-            <div className="onboarding-choices" role="radiogroup" aria-label="Processing privacy">
+            <Dialog.Title>{t('Where should AI run?')}</Dialog.Title>
+            <Dialog.Description id="onboarding-step-description">{t('You can change this any time in Settings. Local only blocks every cloud call, including fallbacks.')}</Dialog.Description>
+            <div className="onboarding-choices" role="radiogroup" aria-label={t('Processing privacy')}>
               <button type="button" className="onboarding-card" role="radio" aria-checked={local} disabled={!settings} onClick={() => settings && setSettings({ ...settings, privacyMode: 'local-only', transcriptionEngine: 'whisper', transcriptionModel: '', transcriptionDiarize: false, transcriptionFallback: [], analysisProvider: 'ollama', analysisModel: '', documentProvider: 'ollama', documentModel: '', chatProvider: 'ollama', chatModel: '' })}>
-                <Lock /><strong>Local only</strong><span>Whisper.cpp transcribes and Ollama writes documents, all on this machine. Slower, fully offline.</span>
+                <Lock /><strong>{t('Local only')}</strong><span>{t('Whisper.cpp transcribes and Ollama writes documents, all on this machine. Slower, fully offline.')}</span>
               </button>
               <button type="button" className="onboarding-card" role="radio" aria-checked={settings ? !local : false} disabled={!settings} onClick={() => settings && setSettings({ ...settings, privacyMode: 'selected-providers' })}>
-                <Cloud /><strong>Providers I choose</strong><span>Send audio or text only to the providers you select, with your own API keys. Faster and more accurate.</span>
+                <Cloud /><strong>{t('Providers I choose')}</strong><span>{t('Send audio or text only to the providers you select, with your own API keys. Faster and more accurate.')}</span>
               </button>
             </div>
           </section>}
 
           {step === 2 && settings && capability && <section>
-            <Dialog.Title>Pick a transcription model</Dialog.Title>
-            <Dialog.Description id="onboarding-step-description">This is the default; each recording can still use another provider or profile.</Dialog.Description>
-            <div className="onboarding-providers" role="radiogroup" aria-label="Transcription provider">
+            <Dialog.Title>{t('Pick a transcription model')}</Dialog.Title>
+            <Dialog.Description id="onboarding-step-description">{t('This is the default; each recording can still use another provider or profile.')}</Dialog.Description>
+            <div className="onboarding-providers" role="radiogroup" aria-label={t('Transcription provider')}>
               {SPEECH.map(id => { const item = settings.capabilities[id]; const blocked = local && !item.local
                 return <button key={id} type="button" className="onboarding-card" role="radio" aria-checked={engine === id} disabled={blocked || busy} onClick={() => { setChecked(''); setKey(''); setSettings({ ...settings, transcriptionEngine: id, transcriptionModel: '', transcriptionDiarize: false, transcriptionVocabulary: [], transcriptionFallback: [], ...(item.prompt ? {} : { transcriptionPrompt: '' }) }) }}>
-                  <strong>{item.label}</strong><span>{BLURB[id]}</span>
-                  <small>{[item.local ? 'On device' : 'Cloud', item.prompt && 'Prompt', item.vocabulary && 'Vocabulary', item.diarization && 'Speakers'].filter(Boolean).join(' · ')}</small>
+                  <strong>{item.label}</strong><span>{blurb()[id]}</span>
+                  <small>{[item.local ? t('On device') : t('Cloud'), item.prompt && t('Prompt'), item.vocabulary && t('Vocabulary'), item.diarization && t('Speakers')].filter(Boolean).join(' · ')}</small>
                 </button> })}
             </div>
             <div className="onboarding-fields">
-              <label>Model<select value={settings.transcriptionModel} onChange={event => setSettings({ ...settings, transcriptionModel: event.target.value })}><option value="">{capability.models[0]} (default)</option>{capability.models.map(model => <option key={model}>{model}</option>)}</select></label>
-              <label>Language<select value={settings.transcriptionLanguage} onChange={event => setSettings({ ...settings, transcriptionLanguage: event.target.value })}>{LANGUAGES.map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></label>
-              {capability.diarization && <label className="onboarding-check"><input type="checkbox" checked={settings.transcriptionDiarize} onChange={event => setSettings({ ...settings, transcriptionDiarize: event.target.checked })} />Label speakers</label>}
+              <label>{t('Model')}<select value={settings.transcriptionModel} onChange={event => setSettings({ ...settings, transcriptionModel: event.target.value })}><option value="">{t('{model} (default)', { model: capability.models[0] })}</option>{capability.models.map(model => <option key={model}>{model}</option>)}</select></label>
+              <label>{t('Language')}<select value={settings.transcriptionLanguage} onChange={event => setSettings({ ...settings, transcriptionLanguage: event.target.value })}>{localizeLanguages().map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></label>
+              {capability.diarization && <label className="onboarding-check"><input type="checkbox" checked={settings.transcriptionDiarize} onChange={event => setSettings({ ...settings, transcriptionDiarize: event.target.checked })} />{t('Label speakers')}</label>}
             </div>
             {needsKey ? <div className="onboarding-key">
-              <label>{capability.label} API key<input type="password" autoComplete="off" value={key} placeholder={hasKey ? 'Saved key — leave empty to keep it' : 'Paste your key'} onChange={event => { setKey(event.target.value); setChecked('') }} /></label>
-              <Button type="button" variant="outline" disabled={busy || (!key.trim() && !hasKey)} onClick={() => void check()}>{checked === engine ? <CheckCircle2 /> : busy ? <Loader2 className="animate-spin" /> : <ShieldCheck />}{checked === engine ? 'Connected' : 'Check'}</Button>
-              <p>Keys are stored in this vault only and never shown again. The check lists your models; it sends no audio.</p>
-            </div> : <p className="onboarding-note">{status?.engine === 'whisper' && status.engineReady ? <><CheckCircle2 />whisper.cpp is installed.</> : <>Install <code>whisper-cpp</code> and put <code>ggml-{settings.transcriptionModel || 'base'}.bin</code> in <code>WHISPER_MODELS_DIR</code>. OpenPlod never downloads models for you.</>}</p>}
+              <label>{t('{provider} API key', { provider: capability.label })}<input type="password" autoComplete="off" value={key} placeholder={hasKey ? t('Saved key — leave empty to keep it') : t('Paste your key')} onChange={event => { setKey(event.target.value); setChecked('') }} /></label>
+              <Button type="button" variant="outline" disabled={busy || (!key.trim() && !hasKey)} onClick={() => void check()}>{checked === engine ? <CheckCircle2 /> : busy ? <Loader2 className="animate-spin" /> : <ShieldCheck />}{checked === engine ? t('Connected') : t('Check')}</Button>
+              <p>{t('Keys are stored in this vault only and never shown again. The check lists your models; it sends no audio.')}</p>
+            </div> : <p className="onboarding-note">{status?.engine === 'whisper' && status.engineReady ? <><CheckCircle2 />{t('whisper.cpp is installed.')}</> : <>{t('Install {package} and put {file} in {folder}. OpenPlod never downloads models for you.', { package: 'whisper-cpp', file: `ggml-${settings.transcriptionModel || 'base'}.bin`, folder: 'WHISPER_MODELS_DIR' })}</>}</p>}
           </section>}
 
           {step === 3 && <section>
-            <Dialog.Title>What do you usually record?</Dialog.Title>
-            <Dialog.Description id="onboarding-step-description">A profile gives the speech model a context prompt and words to spell right. You can edit it, or add more, in Settings.</Dialog.Description>
-            <div className="onboarding-presets" role="radiogroup" aria-label="Transcription profile">
+            <Dialog.Title>{t('What do you usually record?')}</Dialog.Title>
+            <Dialog.Description id="onboarding-step-description">{t('A profile gives the speech model a context prompt and words to spell right. You can edit it, or add more, in Settings.')}</Dialog.Description>
+            <div className="onboarding-presets" role="radiogroup" aria-label={t('Transcription profile')}>
               {presets.map(item => <button key={item.id} type="button" className="onboarding-card" role="radio" aria-checked={preset === item.id} onClick={() => setPreset(value => value === item.id ? '' : item.id)}>
                 <Sparkles /><strong>{item.name}</strong><span>{item.description}</span>
               </button>)}
             </div>
-            {preset && capability && !capability.prompt && <p className="onboarding-note">{capability.label} cannot take a context prompt, so only the profile’s language and speaker settings apply. OpenAI and Whisper.cpp use the full prompt.</p>}
+            {preset && capability && !capability.prompt && <p className="onboarding-note">{t('{provider} cannot take a context prompt, so only the profile’s language and speaker settings apply. OpenAI and Whisper.cpp use the full prompt.', { provider: capability.label })}</p>}
           </section>}
 
           {step === 4 && <section>
-            <Dialog.Title>Bring in your first recording</Dialog.Title>
-            <Dialog.Description id="onboarding-step-description">{status && status.recordings > 0 ? `Your vault already holds ${status.recordings} recording${status.recordings === 1 ? '' : 's'}. ` : ''}Choose where to start. Setup is complete either way.</Dialog.Description>
+            <Dialog.Title>{t('Bring in your first recording')}</Dialog.Title>
+            <Dialog.Description id="onboarding-step-description">{status && status.recordings > 0 ? `${tn(status.recordings, 'Your vault already holds {count} recording.', 'Your vault already holds {count} recordings.')} ` : ''}{t('Choose where to start. Setup is complete either way.')}</Dialog.Description>
             <div className="onboarding-actions">
-              {!mobile && <button type="button" className="onboarding-card" disabled={busy} onClick={() => void finish(false, '/devices')}><Bluetooth /><strong>Plaud Note Pro</strong><span>Pair over Bluetooth and copy recordings without deleting them from the device.</span><ArrowRight /></button>}
-              <button type="button" className="onboarding-card" disabled={busy} onClick={() => void finish(false, '/import')}><Upload /><strong>Import audio files</strong><span>Drop MP3, M4A, WAV, or OGG files, or a Plaud export.</span><ArrowRight /></button>
-              <button type="button" className="onboarding-card" disabled={busy} onClick={() => void finish(false, '/record')}><Mic /><strong>Record now</strong><span>Capture a meeting with this device’s microphone.</span><ArrowRight /></button>
-              {!mobile && <button type="button" className="onboarding-card" disabled={busy} onClick={() => void finish(false, '/android')}><Smartphone /><strong>Pair an Android phone</strong><span>Scan a QR code to send phone recordings to this vault.</span><ArrowRight /></button>}
-              <button type="button" className="onboarding-card" disabled={busy} onClick={() => void finish(false, '/notes')}><FileText /><strong>Start with documents</strong><span>Write Markdown notes and organize them in folders.</span><ArrowRight /></button>
+              {!mobile && <button type="button" className="onboarding-card" disabled={busy} onClick={() => void finish(false, '/devices')}><Bluetooth /><strong>Plaud Note Pro</strong><span>{t('Pair over Bluetooth and copy recordings without deleting them from the device.')}</span><ArrowRight /></button>}
+              <button type="button" className="onboarding-card" disabled={busy} onClick={() => void finish(false, '/import')}><Upload /><strong>{t('Import audio files')}</strong><span>{t('Drop MP3, M4A, WAV, or OGG files, or a Plaud export.')}</span><ArrowRight /></button>
+              <button type="button" className="onboarding-card" disabled={busy} onClick={() => void finish(false, '/record')}><Mic /><strong>{t('Record now')}</strong><span>{t('Capture a meeting with this device’s microphone.')}</span><ArrowRight /></button>
+              {!mobile && <button type="button" className="onboarding-card" disabled={busy} onClick={() => void finish(false, '/android')}><Smartphone /><strong>{t('Pair an Android phone')}</strong><span>{t('Scan a QR code to send phone recordings to this vault.')}</span><ArrowRight /></button>}
+              <button type="button" className="onboarding-card" disabled={busy} onClick={() => void finish(false, '/notes')}><FileText /><strong>{t('Start with documents')}</strong><span>{t('Write Markdown notes and organize them in folders.')}</span><ArrowRight /></button>
             </div>
           </section>}
           {error && <p role="alert" className="onboarding-error">{error}</p>}
-          {!settings && !error && <p role="status" className="onboarding-note"><Loader2 className="animate-spin" />Loading your settings…</p>}
+          {!settings && !error && <p role="status" className="onboarding-note"><Loader2 className="animate-spin" />{t('Loading your settings…')}</p>}
         </div>
 
         <footer className="onboarding-footer">
-          {step > 0 ? <Button variant="ghost" disabled={busy} onClick={() => { setError(''); setStep(step - 1) }}><ArrowLeft />Back</Button> : <span />}
-          {step === 0 && <Button disabled={busy} onClick={() => setStep(1)}>Get started<ArrowRight /></Button>}
-          {step === 1 && <Button disabled={busy || !settings} onClick={() => setStep(2)}>Continue<ArrowRight /></Button>}
-          {step === 2 && <Button disabled={busy || !settings || (needsKey && !hasKey && !key.trim())} onClick={() => void saveTranscription()}>{busy ? <Loader2 className="animate-spin" /> : null}Save and continue<ArrowRight /></Button>}
-          {step === 3 && <Button disabled={busy} onClick={() => void saveProfile()}>{busy ? <Loader2 className="animate-spin" /> : null}{preset ? 'Use this profile' : 'Skip for now'}<ArrowRight /></Button>}
-          {step === 4 && <Button disabled={busy} onClick={() => void finish(false)}><Check />Open my vault</Button>}
+          {step > 0 ? <Button variant="ghost" disabled={busy} onClick={() => { setError(''); setStep(step - 1) }}><ArrowLeft />{t('Back')}</Button> : <span />}
+          {step === 0 && <Button disabled={busy} onClick={() => setStep(1)}>{t('Get started')}<ArrowRight /></Button>}
+          {step === 1 && <Button disabled={busy || !settings} onClick={() => setStep(2)}>{t('Continue')}<ArrowRight /></Button>}
+          {step === 2 && <Button disabled={busy || !settings || (needsKey && !hasKey && !key.trim())} onClick={() => void saveTranscription()}>{busy ? <Loader2 className="animate-spin" /> : null}{t('Save and continue')}<ArrowRight /></Button>}
+          {step === 3 && <Button disabled={busy} onClick={() => void saveProfile()}>{busy ? <Loader2 className="animate-spin" /> : null}{preset ? t('Use this profile') : t('Skip for now')}<ArrowRight /></Button>}
+          {step === 4 && <Button disabled={busy} onClick={() => void finish(false)}><Check />{t('Open my vault')}</Button>}
         </footer>
       </Dialog.Content>
     </Dialog.Portal>

@@ -1,3 +1,4 @@
+import { t } from '@/i18n'
 import type { TranscriptVersion } from './api'
 
 /**
@@ -10,10 +11,11 @@ import type { TranscriptVersion } from './api'
 /** "generated · deepgram nova-3 · comparison run". */
 export function versionTitle(version: TranscriptVersion): string {
   const provider = version.provenance?.provider
+  const origins: Record<string, string> = { generated: t('generated'), edited: t('edited'), translated: t('translated'), cleanup: t('cleanup') }
   return [
-    version.origin,
+    origins[version.origin] ?? version.origin,
     provider ? `${provider}${version.provenance?.model ? ` ${version.provenance.model}` : ''}` : null,
-    version.provenance?.comparison ? 'comparison run' : null,
+    version.provenance?.comparison ? t('comparison run') : null,
   ].filter(Boolean).join(' · ')
 }
 

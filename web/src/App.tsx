@@ -4,7 +4,7 @@ import { Layout } from '@/components/Layout'
 import { Loader2 } from "@/components/icons"
 import { RuntimeGate } from '@/components/RuntimeGate'
 import { SharedAudioRouter } from '@/components/SharedAudioRouter'
-import { useLocale } from '@/i18n'
+import { t, useLocale } from '@/i18n'
 
 const DevicesPage = lazy(() => import('@/pages/DevicesPage').then(module => ({ default: module.DevicesPage })))
 
@@ -22,7 +22,7 @@ const AutomationsPage = lazy(() => import('@/pages/AutomationsPage').then(module
 
 function PageFallback() {
   return (
-    <div className="flex h-full items-center justify-center" role="status" aria-label="Loading page">
+    <div className="flex h-full items-center justify-center" role="status" aria-label={t('Loading page')}>
       <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
     </div>
   )

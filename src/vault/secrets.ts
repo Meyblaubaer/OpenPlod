@@ -16,7 +16,8 @@ import { dirname, join, resolve } from 'node:path';
  * Legacy plaintext values are still read, and `migratePlaintextSecrets` encrypts them
  * in place on startup.
  */
-export const SECRET_SETTING_KEYS = ['mistralApiKey', 'deepgramApiKey', 'openaiApiKey', 'assemblyaiApiKey', 'anthropicApiKey', 'openWhistleApiKey'] as const;
+export const SECRET_SETTING_KEYS = ['mistralApiKey', 'deepgramApiKey', 'openaiApiKey', 'assemblyaiApiKey', 'anthropicApiKey', 'geminiApiKey', 'customApiKey', 'openWhistleApiKey',
+  'todoistApiToken', 'linearApiKey', 'notionApiKey'] as const;
 const PREFIX = 'enc:v1:';
 
 export function isSecretSetting(key: string) { return (SECRET_SETTING_KEYS as readonly string[]).includes(key); }

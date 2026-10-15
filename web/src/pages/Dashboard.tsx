@@ -45,6 +45,7 @@ import { RecordingTagsDialog } from "@/components/RecordingTagsDialog";
 import { Button } from "@/components/ui/button";
 import { api, type Recording } from "@/lib/api";
 import { formatDuration } from "@/lib/utils";
+import { formatDate, t, tn } from "@/i18n";
 import { BatchTranscribe } from '@/components/BatchTranscribe'
 import { COLLECTIONS_EVENT, CollectionContextSubmenu, CollectionDropdownSubmenu, CollectionNameDialog } from '@/components/RecordingCollections'
 import { knowledgeApi, type RecordingCollection } from '@/lib/knowledge'
@@ -211,7 +212,7 @@ export function Dashboard() {
   const purge = async (id: string) => {
     if (
       !window.confirm(
-        "Permanently delete this recording and its audio? This cannot be undone.",
+        t("Permanently delete this recording and its audio? This cannot be undone."),
       )
     )
       return;
@@ -238,7 +239,7 @@ export function Dashboard() {
     }
   };
   const deleteCollection = async (collection: RecordingCollection) => {
-    if (!window.confirm(`Delete the collection "${collection.name}"? Its recordings are kept.`)) return;
+    if (!window.confirm(t('Delete the collection "{name}"? Its recordings are kept.', { name: collection.name }))) return;
     try {
       await knowledgeApi.deleteCollection(collection.id, collection.revision);
       collectionsChanged();
@@ -254,11 +255,11 @@ export function Dashboard() {
     onCreate: () => setNaming({ mode: "create", recordingId: row.id }),
   });
   const filters = [
-    { id: "all", label: "All", icon: FileAudio },
-    { id: "voice", label: "Voice", icon: Mic },
+    { id: "all", label: t("All"), icon: FileAudio },
+    { id: "voice", label: t("Voice"), icon: Mic },
     { id: "plaud", label: "Plaud", icon: Bluetooth },
-    { id: "imported", label: "Imported", icon: Upload },
-    { id: "starred", label: "Starred", icon: Star },
+    { id: "imported", label: t("Imported"), icon: Upload },
+    { id: "starred", label: t("Starred"), icon: Star },
   ];
   return (
     <div className="studio-page">
@@ -268,28 +269,30 @@ export function Dashboard() {
       <div
         className={`studio-columns ${retention === "trash" ? "trash-layout" : ""}`}
       >
-        <section className="studio-library" aria-label="Recording library">
+        <section className="studio-library" aria-label={t("Recording library")}>
           <header className="studio-library-heading">
             <div>
               <h1>
                 {retention === "trash"
-                  ? "Trash"
+                  ? t("Trash")
                   : starred
-                    ? "Starred"
+                    ? t("Starred")
                     : collectionId
-                      ? activeCollection?.name ?? "Collection"
-                      : "Recordings"}
+                      ? activeCollection?.name ?? t("Collection")
+                      : t("Recordings")}
               </h1>
               <p>
                 {loading && !recordings.length
-                  ? "Loading recordings..."
-                  : `${filtered.length}${more ? "+" : ""} recording${filtered.length === 1 ? "" : "s"}`}
+                  ? t("Loading recordings...")
+                  : more
+                    ? tn(filtered.length, "{count}+ recording", "{count}+ recordings")
+                    : tn(filtered.length, "{count} recording", "{count} recordings")}
               </p>
             </div>
             {collectionId && activeCollection ? (
               <div className="studio-collection-tools">
-                <Button variant="outline" size="sm" onClick={() => setNaming({ mode: "rename", collection: activeCollection })}><Pencil />Rename</Button>
-                <Button variant="ghost" size="sm" onClick={() => void deleteCollection(activeCollection)}><Trash2 />Delete collection</Button>
+                <Button variant="outline" size="sm" onClick={() => setNaming({ mode: "rename", collection: activeCollection })}><Pencil />{t("Rename")}</Button>
+                <Button variant="ghost" size="sm" onClick={() => void deleteCollection(activeCollection)}><Trash2 />{t("Delete collection")}</Button>
               </div>
             ) : (
               <PlaudImportDialog />
@@ -302,7 +305,7 @@ export function Dashboard() {
             <div
               className="studio-source-tabs"
               role="tablist"
-              aria-label="Recording source"
+              aria-label={t("Recording source")}
             >
               {filters.map(({ id, label, icon: Icon }, index) => (
                 <button
@@ -329,30 +332,30 @@ export function Dashboard() {
               <button
                 className="studio-control"
                 onClick={() => setFiltersOpen(true)}
-                aria-label="Filter recordings"
+                aria-label={t("Filter recordings")}
               >
                 <SlidersHorizontal />
-                <span>Filters</span>
+                <span>{t("Filters")}</span>
               </button>
               <select
-                aria-label="Sort recordings"
+                aria-label={t("Sort recordings")}
                 value={sort}
                 onChange={(e) => setSort(e.target.value)}
               >
-                <option value="newest">Newest first</option>
-                <option value="oldest">Oldest first</option>
-                <option value="title">Title A-Z</option>
+                <option value="newest">{t("Newest first")}</option>
+                <option value="oldest">{t("Oldest first")}</option>
+                <option value="title">{t("Title A-Z")}</option>
               </select>
               <div className="studio-view-toggle">
                 <button
-                  aria-label="List view"
+                  aria-label={t("List view")}
                   aria-pressed={view === "list"}
                   onClick={() => setView("list")}
                 >
                   <List />
                 </button>
                 <button
-                  aria-label="Grid view"
+                  aria-label={t("Grid view")}
                   aria-pressed={view === "grid"}
                   onClick={() => setView("grid")}
                 >
@@ -367,7 +370,7 @@ export function Dashboard() {
               <p>{error}</p>
               <Button variant="ghost" onClick={() => void load()}>
                 <RefreshCw />
-                Retry
+                {t("Retry")}
               </Button>
             </div>
           )}
@@ -380,22 +383,22 @@ export function Dashboard() {
               <FileAudio />
               <h2>
                 {search || source !== "all" || status !== "all"
-                  ? "No matching recordings"
+                  ? t("No matching recordings")
                   : retention === "trash"
-                    ? "Trash is empty"
+                    ? t("Trash is empty")
                     : collectionId
-                      ? "No recordings in this collection"
-                      : "No recordings yet"}
+                      ? t("No recordings in this collection")
+                      : t("No recordings yet")}
               </h2>
               {retention === "trash" ? (
-                <p>Deleted recordings remain recoverable for 30 days.</p>
+                <p>{t("Deleted recordings remain recoverable for 30 days.")}</p>
               ) : collectionId ? (
-                <p>Right-click a recording, or use its actions menu, and choose Add to collection.</p>
+                <p>{t("Right-click a recording, or use its actions menu, and choose Add to collection.")}</p>
               ) : (
                 <Button asChild variant="outline">
                   <Link to="/record">
                     <Mic />
-                    New recording
+                    {t("New recording")}
                   </Link>
                 </Button>
               )}
@@ -415,7 +418,7 @@ export function Dashboard() {
                     id={`recording-open-${row.id}`}
                     className="studio-row-main"
                     onClick={() => choose(row.id)}
-                    aria-label={`Open ${row.title}`}
+                    aria-label={t("Open {title}", { title: row.title })}
                     aria-pressed={activeId === row.id}
                   >
                     <span className="studio-source-icon">
@@ -437,7 +440,7 @@ export function Dashboard() {
                       : [
                           row.sourceProvider === "plaud"
                             ? "Plaud"
-                            : row.recordingType === 'other' ? 'Imported' : row.recordingType,
+                            : row.recordingType === 'other' ? t('Imported') : row.recordingType,
                         ]
                     )
                       .slice(0, 2)
@@ -446,7 +449,7 @@ export function Dashboard() {
                       ))}
                   </div>
                   <time dateTime={row.recordedAt}>
-                    {new Date(row.recordedAt).toLocaleString(undefined, {
+                    {formatDate(row.recordedAt, {
                       month: "short",
                       day: "numeric",
                       year: "numeric",
@@ -461,15 +464,15 @@ export function Dashboard() {
                     {retention === "trash" ? (
                       <>
                         <button
-                          title="Restore recording"
-                          aria-label={`Restore ${row.title}`}
+                          title={t("Restore recording")}
+                          aria-label={t("Restore {title}", { title: row.title })}
                           onClick={() => void restore(row.id)}
                         >
                           <RotateCcw />
                         </button>
                         <button
-                          title="Permanently delete"
-                          aria-label={`Permanently delete ${row.title}`}
+                          title={t("Permanently delete")}
+                          aria-label={t("Permanently delete {title}", { title: row.title })}
                           onClick={() => void purge(row.id)}
                         >
                           <Trash2 />
@@ -478,23 +481,23 @@ export function Dashboard() {
                     ) : (
                       <DropdownMenu.Root>
                         <DropdownMenu.Trigger
-                          aria-label={`Actions for ${row.title}`}
-                          title="Recording actions"
+                          aria-label={t("Actions for {title}", { title: row.title })}
+                          title={t("Recording actions")}
                         >
                           <MoreHorizontal />
                         </DropdownMenu.Trigger>
                         <DropdownMenu.Portal>
                           <DropdownMenu.Content className="action-menu" align="end" sideOffset={6} onCloseAutoFocus={event => { if (tagEditorOpen.current) event.preventDefault(); }}>
                             <DropdownMenu.Item onSelect={() => choose(row.id)}>
-                              <Play />Open preview
+                              <Play />{t("Open preview")}
                             </DropdownMenu.Item>
                             <DropdownMenu.Item onSelect={() => editTags(row)}>
-                              <Tags />Edit tags
+                              <Tags />{t("Edit tags")}
                             </DropdownMenu.Item>
                             <CollectionDropdownSubmenu {...collectionMenu(row)} />
                             <DropdownMenu.Item asChild>
                               <Link to={`/recording/${row.id}`}>
-                                <Pencil />Edit recording
+                                <Pencil />{t("Edit recording")}
                               </Link>
                             </DropdownMenu.Item>
                             <DropdownMenu.Item
@@ -502,7 +505,7 @@ export function Dashboard() {
                                 navigate(`/ai?recording=${row.id}`)
                               }
                             >
-                              <MessageSquare />Ask AI
+                              <MessageSquare />{t("Ask AI")}
                             </DropdownMenu.Item>
                           </DropdownMenu.Content>
                         </DropdownMenu.Portal>
@@ -513,11 +516,11 @@ export function Dashboard() {
                 </ContextMenu.Trigger>
                 <ContextMenu.Portal>
                   <ContextMenu.Content className="action-menu" onCloseAutoFocus={event => { if (tagEditorOpen.current) event.preventDefault(); }}>
-                    <ContextMenu.Item onSelect={() => choose(row.id)}><Play />Open preview</ContextMenu.Item>
-                    <ContextMenu.Item onSelect={() => editTags(row)}><Tags />Edit tags</ContextMenu.Item>
+                    <ContextMenu.Item onSelect={() => choose(row.id)}><Play />{t("Open preview")}</ContextMenu.Item>
+                    <ContextMenu.Item onSelect={() => editTags(row)}><Tags />{t("Edit tags")}</ContextMenu.Item>
                     <CollectionContextSubmenu {...collectionMenu(row)} />
-                    <ContextMenu.Item onSelect={() => navigate(`/recording/${row.id}`)}><Pencil />Edit recording</ContextMenu.Item>
-                    <ContextMenu.Item onSelect={() => navigate(`/ai?recording=${row.id}`)}><MessageSquare />Ask AI</ContextMenu.Item>
+                    <ContextMenu.Item onSelect={() => navigate(`/recording/${row.id}`)}><Pencil />{t("Edit recording")}</ContextMenu.Item>
+                    <ContextMenu.Item onSelect={() => navigate(`/ai?recording=${row.id}`)}><MessageSquare />{t("Ask AI")}</ContextMenu.Item>
                   </ContextMenu.Content>
                 </ContextMenu.Portal>
                 </ContextMenu.Root>
@@ -531,7 +534,7 @@ export function Dashboard() {
               disabled={loading}
               onClick={() => void moreRows()}
             >
-              <ChevronDown />Load more recordings
+              <ChevronDown />{t("Load more recordings")}
             </Button>
           )}
         </section>
@@ -547,7 +550,7 @@ export function Dashboard() {
             retention === "active" && (
               <div className="studio-preview-empty">
                 <FileAudio />
-                <p>Select a recording</p>
+                <p>{t("Select a recording")}</p>
               </div>
             )
           ))}
@@ -560,7 +563,7 @@ export function Dashboard() {
       }} />}
       {naming && (
         <CollectionNameDialog
-          title={naming.mode === "rename" ? "Rename collection" : "New collection"}
+          title={naming.mode === "rename" ? t("Rename collection") : t("New collection")}
           initial={naming.mode === "rename" ? naming.collection.name : ""}
           onClose={() => setNaming(null)}
           onSubmit={async (name) => {
@@ -586,36 +589,36 @@ export function Dashboard() {
             aria-describedby={undefined}
           >
             <div className="flex items-center justify-between">
-              <Dialog.Title>Filter recordings</Dialog.Title>
-              <Dialog.Close aria-label="Close filters">
+              <Dialog.Title>{t("Filter recordings")}</Dialog.Title>
+              <Dialog.Close aria-label={t("Close filters")}>
                 <X />
               </Dialog.Close>
             </div>
             <label className="studio-filter-label">
-              Title or tag
+              {t("Title or tag")}
               <input
-                aria-label="Filter by title or tag"
+                aria-label={t("Filter by title or tag")}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
             </label>
             <label className="studio-filter-label">
-              Processing status
+              {t("Processing status")}
               <select
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
               >
-                {["all", "complete", "pending", "transcribing", "failed"].map(
-                  (value) => (
+                {([["all", t("All")], ["complete", t("Complete")], ["pending", t("Pending")], ["transcribing", t("Transcribing")], ["failed", t("Failed")]] as const).map(
+                  ([value, label]) => (
                     <option key={value} value={value}>
-                      {value}
+                      {label}
                     </option>
                   ),
                 )}
               </select>
             </label>
             <Dialog.Close asChild>
-              <Button><Check />Show recordings</Button>
+              <Button><Check />{t("Show recordings")}</Button>
             </Dialog.Close>
           </Dialog.Content>
         </Dialog.Portal>

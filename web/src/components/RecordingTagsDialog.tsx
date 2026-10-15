@@ -5,6 +5,7 @@ import { Button } from './ui/button'
 import { api, type Recording } from '@/lib/api'
 import { addRecordingTags } from '@/lib/recording-tags'
 import { knowledgeApi, type RecordingSuggestions } from '@/lib/knowledge'
+import { t } from '@/i18n'
 import './recording-tags.css'
 import './knowledge.css'
 
@@ -31,7 +32,7 @@ export function RecordingTagsDialog({ recording, onSaved, onClose }: {
     const controller = new AbortController(); suggestAbort.current = controller
     setSuggesting(true); setError('')
     try { const next = await knowledgeApi.suggestRecording(recording.id, controller.signal); setSuggestion(next); setUseTitle(false) }
-    catch (failure) { if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : 'Suggestions failed.') }
+    catch (failure) { if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : t('Suggestions failed.')) }
     finally { if (!controller.signal.aborted) setSuggesting(false) }
   }
 
@@ -41,7 +42,7 @@ export function RecordingTagsDialog({ recording, onSaved, onClose }: {
       if (disposed) return
       setSaved(row); setTags(row.tags); setInput('')
     }).catch(failure => {
-      if (!disposed) setError(failure instanceof Error ? failure.message : 'Could not load tags.')
+      if (!disposed) setError(failure instanceof Error ? failure.message : t('Could not load tags.'))
     }).finally(() => { if (!disposed) setLoading(false) })
     return () => { disposed = true }
   }, [recording.id, reload])
@@ -51,7 +52,7 @@ export function RecordingTagsDialog({ recording, onSaved, onClose }: {
   const title = useTitle && suggestion?.title ? suggestion.title : null
   const changed = saved && (JSON.stringify(pendingTags) !== JSON.stringify(saved.tags) || title !== null)
   const add = () => { setTags(pendingTags); setInput(''); inputRef.current?.focus() }
-  return <NoteDialog title="Edit tags" description={recording.title} onClose={onClose} busy={busy}>
+  return <NoteDialog title={t('Edit tags')} description={recording.title} onClose={onClose} busy={busy}>
     <form onSubmit={async event => {
       event.preventDefault()
       if (!saved || !changed || loading || busy) return
@@ -61,36 +62,36 @@ export function RecordingTagsDialog({ recording, onSaved, onClose }: {
         onSaved(updated); onClose()
       } catch (failure) {
         setError(failure instanceof Error && failure.message === 'revision_conflict'
-          ? 'This recording changed elsewhere. Reload tags before saving again.'
-          : failure instanceof Error ? failure.message : 'Could not save tags.')
+          ? t('This recording changed elsewhere. Reload tags before saving again.')
+          : failure instanceof Error ? failure.message : t('Could not save tags.'))
       } finally { setBusy(false) }
     }}>
-      {loading ? <p role="status" className="recording-tags-loading"><Loader2 className="animate-spin" />Loading tags...</p> : <>
-        <ul className="recording-tag-list" aria-label="Recording tags">
-          {tags.map(tag => <li key={tag}><Tag aria-hidden="true" /><span>{tag}</span><button type="button" disabled={busy} aria-label={`Remove tag ${tag}`} title={`Remove ${tag}`} onClick={() => setTags(current => current.filter(value => value !== tag))}><X /></button></li>)}
+      {loading ? <p role="status" className="recording-tags-loading"><Loader2 className="animate-spin" />{t('Loading tags...')}</p> : <>
+        <ul className="recording-tag-list" aria-label={t('Recording tags')}>
+          {tags.map(tag => <li key={tag}><Tag aria-hidden="true" /><span>{tag}</span><button type="button" disabled={busy} aria-label={t('Remove tag {tag}', { tag })} title={t('Remove {tag}', { tag })} onClick={() => setTags(current => current.filter(value => value !== tag))}><X /></button></li>)}
         </ul>
-        <label htmlFor="recording-tag-input">Add a tag</label>
+        <label htmlFor="recording-tag-input">{t('Add a tag')}</label>
         <div className="recording-tag-input">
           <input ref={inputRef} id="recording-tag-input" value={input} disabled={busy || !saved} autoComplete="off" onChange={event => setInput(event.target.value)} onKeyDown={event => {
             if (event.key === 'Enter' && !event.nativeEvent.isComposing && input.trim()) { event.preventDefault(); add() }
           }} />
-          <Button type="button" variant="outline" size="icon" aria-label="Add tag" title="Add tag" disabled={busy || !saved || !input.trim()} onClick={add}><Plus /></Button>
+          <Button type="button" variant="outline" size="icon" aria-label={t('Add tag')} title={t('Add tag')} disabled={busy || !saved || !input.trim()} onClick={add}><Plus /></Button>
         </div>
         {saved?.hasTranscript !== false && <div className="knowledge-suggestion">
           <div className="knowledge-row">
-            <Button type="button" variant="outline" size="sm" disabled={busy || suggesting || !saved} onClick={() => void suggest()}>{suggesting ? <Loader2 className="animate-spin" /> : <Sparkles />}Suggest title and tags</Button>
+            <Button type="button" variant="outline" size="sm" disabled={busy || suggesting || !saved} onClick={() => void suggest()}>{suggesting ? <Loader2 className="animate-spin" /> : <Sparkles />}{t('Suggest title and tags')}</Button>
           </div>
-          <p className="knowledge-note">Sends the beginning of this transcript to your analysis provider. Suggestions are only applied when you tick them and save.</p>
+          <p className="knowledge-note">{t('Sends the beginning of this transcript to your analysis provider. Suggestions are only applied when you tick them and save.')}</p>
           {suggestion && <>
-            {suggestion.title && <label><input type="checkbox" checked={useTitle} disabled={busy} onChange={event => setUseTitle(event.target.checked)} />Rename to “{suggestion.title}”</label>}
-            {suggestion.tags.length > 0 && <div className="knowledge-chips" aria-label="Suggested tags">{suggestion.tags.map(tag => <button key={tag} type="button" disabled={busy || tags.some(value => value.toLocaleLowerCase() === tag)} onClick={() => setTags(current => addRecordingTags(current, tag))}><Plus aria-hidden="true" />{tag}</button>)}</div>}
-            {!suggestion.title && !suggestion.tags.length && <p className="knowledge-note">No new title or tags were suggested.</p>}
-            <p className="knowledge-note">{suggestion.provider} / {suggestion.model}{suggestion.truncated ? ' / only the beginning of a long transcript was read' : ''}</p>
+            {suggestion.title && <label><input type="checkbox" checked={useTitle} disabled={busy} onChange={event => setUseTitle(event.target.checked)} />{t('Rename to “{title}”', { title: suggestion.title })}</label>}
+            {suggestion.tags.length > 0 && <div className="knowledge-chips" aria-label={t('Suggested tags')}>{suggestion.tags.map(tag => <button key={tag} type="button" disabled={busy || tags.some(value => value.toLocaleLowerCase() === tag)} onClick={() => setTags(current => addRecordingTags(current, tag))}><Plus aria-hidden="true" />{tag}</button>)}</div>}
+            {!suggestion.title && !suggestion.tags.length && <p className="knowledge-note">{t('No new title or tags were suggested.')}</p>}
+            <p className="knowledge-note">{suggestion.provider} / {suggestion.model}{suggestion.truncated ? ` / ${t('only the beginning of a long transcript was read')}` : ''}</p>
           </>}
         </div>}
       </>}
-      {error && <div className="recording-tags-error"><p role="alert" className="note-error">{error}</p><Button type="button" size="sm" variant="ghost" disabled={busy || loading} onClick={() => { setLoading(true); setError(''); setSaved(null); setReload(value => value + 1) }}><RefreshCw />Reload tags</Button></div>}
-      <footer><Button type="button" variant="ghost" disabled={busy} onClick={onClose}><X />Cancel</Button><Button disabled={loading || busy || !changed}>{busy ? <Loader2 className="animate-spin" /> : <Check />}{title ? 'Save' : 'Save tags'}</Button></footer>
+      {error && <div className="recording-tags-error"><p role="alert" className="note-error">{error}</p><Button type="button" size="sm" variant="ghost" disabled={busy || loading} onClick={() => { setLoading(true); setError(''); setSaved(null); setReload(value => value + 1) }}><RefreshCw />{t('Reload tags')}</Button></div>}
+      <footer><Button type="button" variant="ghost" disabled={busy} onClick={onClose}><X />{t('Cancel')}</Button><Button disabled={loading || busy || !changed}>{busy ? <Loader2 className="animate-spin" /> : <Check />}{title ? t('Save') : t('Save tags')}</Button></footer>
     </form>
   </NoteDialog>
 }

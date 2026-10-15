@@ -8,6 +8,7 @@ import {
 } from "@/components/icons";
 import { api, type PlaudStatus, type Settings } from "@/lib/api";
 import { getRuntime } from "@/lib/runtime";
+import { t } from "@/i18n";
 
 export function WorkspaceTiles() {
   const [engine, setEngine] = useState<Settings['transcriptionEngine'] | null>(null);
@@ -34,18 +35,18 @@ export function WorkspaceTiles() {
     };
   }, []);
   return (
-    <section className="workspace-tiles" aria-label="Workspace connections">
+    <section className="workspace-tiles" aria-label={t("Workspace connections")}>
       <Link className="workspace-tile plaud-tile" to="/devices">
         <img src="/plaud-note-pro.png" alt="Plaud Note Pro" />
         <div>
           <strong className={plaud?.deviceDetected ? "device-present" : ""}>
             {plaud?.deviceDetected
-              ? "Plaud nearby"
+              ? t("Plaud nearby")
               : unavailable
-                ? "Plaud unavailable"
+                ? t("Plaud unavailable")
                 : plaud
                   ? "Plaud Note Pro"
-                  : "Checking Plaud..."}
+                  : t("Checking Plaud...")}
           </strong>
           <p>Plaud Note Pro</p>
         </div>
@@ -56,8 +57,8 @@ export function WorkspaceTiles() {
           <AudioLines />
         </span>
         <div>
-          <strong>Transcripts</strong>
-          <p>{engine ? `Powered by ${{ mistral: 'Mistral', whisper: 'local Whisper', deepgram: 'Deepgram', openai: 'OpenAI', assemblyai: 'AssemblyAI' }[engine]}` : 'Transcription settings'}</p>
+          <strong>{t("Transcripts")}</strong>
+          <p>{engine === 'whisper' ? t('Powered by local Whisper') : engine ? t('Powered by {engine}', { engine: { mistral: 'Mistral', deepgram: 'Deepgram', openai: 'OpenAI', assemblyai: 'AssemblyAI' }[engine] }) : t('Transcription settings')}</p>
         </div>
         <ChevronRight className="tile-arrow" />
       </Link>
@@ -66,8 +67,8 @@ export function WorkspaceTiles() {
           <FileText />
         </span>
         <div>
-          <strong>Documents</strong>
-          <p>Markdown library</p>
+          <strong>{t("Documents")}</strong>
+          <p>{t("Markdown library")}</p>
         </div>
       </Link>
       <Link className="workspace-tile" to="/android">
@@ -76,7 +77,7 @@ export function WorkspaceTiles() {
         </span>
         <div>
           <strong>Android</strong>
-          <p>Pair your phone</p>
+          <p>{t("Pair your phone")}</p>
         </div>
         <ChevronRight className="tile-arrow" />
       </Link>

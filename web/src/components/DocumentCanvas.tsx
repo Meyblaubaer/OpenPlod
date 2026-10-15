@@ -8,11 +8,12 @@ import { ToggleGroup, ToggleGroupItem } from './ui/toggle-group'
 import { editMarkdown, type MarkdownAction } from '@/lib/markdown-edit'
 import { markdownOutline } from '@/lib/markdown-outline'
 import type { NoteDocument } from '@/lib/notes-api'
+import { formatDate, t, tn } from '@/i18n'
 
-const tools = [
-  ['h1', 'Heading 1', Heading1], ['h2', 'Heading 2', Heading2], ['h3', 'Heading 3', Heading3],
-  ['bold', 'Bold', Bold], ['italic', 'Italic', Italic], ['bullet', 'Bulleted list', List],
-  ['numbered', 'Numbered list', ListOrdered], ['link', 'Insert link', Link2], ['code', 'Inline code', Code], ['quote', 'Blockquote', Quote],
+const tools = () => [
+  ['h1', t('Heading 1'), Heading1], ['h2', t('Heading 2'), Heading2], ['h3', t('Heading 3'), Heading3],
+  ['bold', t('Bold'), Bold], ['italic', t('Italic'), Italic], ['bullet', t('Bulleted list'), List],
+  ['numbered', t('Numbered list'), ListOrdered], ['link', t('Insert link'), Link2], ['code', t('Inline code'), Code], ['quote', t('Blockquote'), Quote],
 ] as const
 
 const heading = (tag: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6') => ({ node, children, ...props }: ComponentProps<'h1'> & ExtraProps) =>
@@ -50,31 +51,31 @@ export function DocumentCanvas({ document, content, onChange, mode, onModeChange
   }
 
   return <div className="document-canvas">
-    <div className="document-format-bar" role="toolbar" aria-label="Markdown formatting">
-      <ToggleGroup type="single" size="sm" className="notes-mode" value={mode} onValueChange={value => { if (value === 'edit' || value === 'preview') onModeChange(value) }} aria-label="Document mode">
-        <ToggleGroupItem value="edit" disabled={!!document.deletedAt}>Markdown</ToggleGroupItem><ToggleGroupItem value="preview">Preview</ToggleGroupItem>
+    <div className="document-format-bar" role="toolbar" aria-label={t('Markdown formatting')}>
+      <ToggleGroup type="single" size="sm" className="notes-mode" value={mode} onValueChange={value => { if (value === 'edit' || value === 'preview') onModeChange(value) }} aria-label={t('Document mode')}>
+        <ToggleGroupItem value="edit" disabled={!!document.deletedAt}>Markdown</ToggleGroupItem><ToggleGroupItem value="preview">{t('Preview')}</ToggleGroupItem>
       </ToggleGroup>
-      <div className="document-format-tools">{tools.map(([action, label, Icon]) => <IconButton key={action} label={label} disabled={readOnly || content.length >= 524288} onMouseDown={event => event.preventDefault()} onClick={() => format(action)}><Icon /></IconButton>)}</div>
-      <span className="document-word-count">{content.trim() ? content.trim().split(/\s+/).length : 0} words</span>
+      <div className="document-format-tools">{tools().map(([action, label, Icon]) => <IconButton key={action} label={label} disabled={readOnly || content.length >= 524288} onMouseDown={event => event.preventDefault()} onClick={() => format(action)}><Icon /></IconButton>)}</div>
+      <span className="document-word-count">{(count => tn(count, '{count} word', '{count} words'))(content.trim() ? content.trim().split(/\s+/).length : 0)}</span>
     </div>
     <div className="document-canvas-columns" data-panel={!!panel}>
       <div className="notes-document-body">
-        {mode === 'edit' && !document.deletedAt ? <textarea ref={textarea} className="notes-markdown-input" aria-label="Markdown content" value={content} maxLength={524288} spellCheck onChange={event => onChange(event.target.value)} disabled={busy} placeholder="# Your note" onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key === 's') { event.preventDefault(); onSave() } }} />
-          : <div ref={preview} className="notes-markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={{ ...headingComponents, img: ({ alt }) => <span className="notes-image-placeholder">[Image: {alt || 'external image'}]</span>, a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer noopener">{children}</a> }}>{deferred || '*Empty note*'}</ReactMarkdown></div>}
+        {mode === 'edit' && !document.deletedAt ? <textarea ref={textarea} className="notes-markdown-input" aria-label={t('Markdown content')} value={content} maxLength={524288} spellCheck onChange={event => onChange(event.target.value)} disabled={busy} placeholder={t('# Your note')} onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key === 's') { event.preventDefault(); onSave() } }} />
+          : <div ref={preview} className="notes-markdown-preview"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={{ ...headingComponents, img: ({ alt }) => <span className="notes-image-placeholder">{t('[Image: {alt}]', { alt: alt || t('external image') })}</span>, a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer noopener">{children}</a> }}>{deferred || t('*Empty note*')}</ReactMarkdown></div>}
       </div>
-      {panel && <aside className="document-inspector" aria-label={panel === 'outline' ? 'Document outline' : 'Document source'}>
-        <header><h3>{panel === 'outline' ? 'Outline' : 'Source'}</h3><IconButton label="Close document panel" onClick={() => setPanel(null)}><PanelRightClose /></IconButton></header>
-        {panel === 'outline' ? mode === 'edit' ? <button className="document-outline-preview" onClick={() => onModeChange('preview')}>Show document outline</button> : headings.length ? <nav>{headings.map(heading => <button key={heading.id} style={{ paddingLeft: 12 + (heading.level - 1) * 10 }} onClick={() => {
+      {panel && <aside className="document-inspector" aria-label={panel === 'outline' ? t('Document outline') : t('Document source')}>
+        <header><h3>{panel === 'outline' ? t('Outline') : t('Source')}</h3><IconButton label={t('Close document panel')} onClick={() => setPanel(null)}><PanelRightClose /></IconButton></header>
+        {panel === 'outline' ? mode === 'edit' ? <button className="document-outline-preview" onClick={() => onModeChange('preview')}>{t('Show document outline')}</button> : headings.length ? <nav>{headings.map(heading => <button key={heading.id} style={{ paddingLeft: 12 + (heading.level - 1) * 10 }} onClick={() => {
           const node = preview.current?.querySelector<HTMLElement>(`#${heading.id}`)
           node?.scrollIntoView({ block: 'start', behavior: 'instant' }); node?.setAttribute('tabindex', '-1'); node?.focus({ preventScroll: true })
-        }}>{heading.label}</button>)}</nav> : <p>No headings in this document.</p> : <>
-          <dl><div><dt>Original</dt><dd>{document.sourceOrigin?.startsWith('ai:mistral:') ? 'Mistral' : document.sourceRecordingId ? 'Transcript' : 'Markdown'}</dd></div><div><dt>Saved version</dt><dd>Revision {document.revision}</dd></div><div><dt>Created</dt><dd>{new Date(document.createdAt).toLocaleDateString()}</dd></div><div><dt>Last edited</dt><dd>{new Date(document.updatedAt).toLocaleString()}</dd></div></dl>
-          {document.sourceRecordingId && <Link to={`/transcripts/${document.sourceRecordingId}`}><FileAudio />Source transcript</Link>}
+        }}>{heading.label}</button>)}</nav> : <p>{t('No headings in this document.')}</p> : <>
+          <dl><div><dt>{t('Original')}</dt><dd>{document.sourceOrigin?.startsWith('ai:mistral:') ? 'Mistral' : document.sourceRecordingId ? t('Transcript') : 'Markdown'}</dd></div><div><dt>{t('Saved version')}</dt><dd>{t('Revision {revision}', { revision: document.revision })}</dd></div><div><dt>{t('Created')}</dt><dd>{formatDate(document.createdAt, { dateStyle: 'short' })}</dd></div><div><dt>{t('Last edited')}</dt><dd>{formatDate(document.updatedAt)}</dd></div></dl>
+          {document.sourceRecordingId && <Link to={`/transcripts/${document.sourceRecordingId}`}><FileAudio />{t('Source transcript')}</Link>}
         </>}
       </aside>}
-      <nav className="document-tool-rail" aria-label="Document tools">
-        <IconButton label="Document outline" aria-pressed={panel === 'outline'} onClick={toggleOutline}><ListTree /></IconButton>
-        <IconButton label="Document source" aria-pressed={panel === 'source'} onClick={() => setPanel(panel === 'source' ? null : 'source')}><TextSelect /></IconButton>
+      <nav className="document-tool-rail" aria-label={t('Document tools')}>
+        <IconButton label={t('Document outline')} aria-pressed={panel === 'outline'} onClick={toggleOutline}><ListTree /></IconButton>
+        <IconButton label={t('Document source')} aria-pressed={panel === 'source'} onClick={() => setPanel(panel === 'source' ? null : 'source')}><TextSelect /></IconButton>
       </nav>
     </div>
   </div>

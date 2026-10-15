@@ -23,8 +23,12 @@ export class OpenPlodClient implements VaultClient {
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
     } catch { throw new Error('OpenPlod could not be reached. Keep the desktop app open and verify the private connection.'); }
-    const payload = await response.json().catch(() => null) as { success?: boolean; data?: unknown; code?: string } | null;
+    const payload = await response.json().catch(() => null) as { success?: boolean; data?: unknown; code?: string; error?: string } | null;
     if (!response.ok || !payload?.success) {
+      // Only a stale revision is a revision conflict. Other 409s (cost confirmation, a job already
+      // running, a used idempotency key) carry their own vault message, which never includes secrets.
+      if (response.status === 409 && payload?.code && !/revision|conflict/i.test(payload.code) && payload.error)
+        throw new Error(`${payload.error.slice(0, 500)} (${payload.code})`);
       if (response.status === 409) throw new Error('Conflict: reload the current revision before retrying. Your changes were not applied.');
       if (response.status === 401) throw new Error('OpenPlod authorization failed. Check your private token.');
       if (response.status === 404) throw new Error('Not found: nothing in the vault has that id.');

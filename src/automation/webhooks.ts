@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import { decryptSecret, encryptSecret, isEncryptedSecret } from '../vault/secrets';
 import { createHmac, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { AutomationError, isLoopbackUrl, localOnly, nowIso, stableId, transportOutcome, validateOutboundUrl, type Fetcher } from './common';
@@ -81,6 +82,7 @@ export function initializeWebhooks(database: Database) {
 }
 
 /** `OpenPlod-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">`. */
+const webhookSecretName = (id: string) => `webhook:${id}`;
 export function signWebhook(secret: string, timestamp: number, body: string): string {
   return `t=${timestamp},v1=${createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex')}`;
 }
@@ -107,6 +109,9 @@ export class WebhookService {
 
   constructor(readonly database: Database, options: WebhookOptions = {}) {
     initializeWebhooks(database);
+    // Signing secrets are encrypted at rest like provider keys (REL-06); older plaintext rows are migrated once.
+    const plain = (database.query('SELECT id, secret FROM webhook_subscriptions').all() as { id: string; secret: string }[]).filter(row => !isEncryptedSecret(row.secret));
+    for (const row of plain) database.query('UPDATE webhook_subscriptions SET secret=? WHERE id=? AND secret=?').run(encryptSecret(webhookSecretName(row.id), row.secret), row.id, row.secret);
     this.fetcher = options.fetcher ?? fetch;
     this.options = { maxAttempts: 6, disableAfter: 5, baseDelayMs: 30000, maxDelayMs: 3600000, timeoutMs: 10000, autoDeliver: true, now: Date.now, ...options };
     // A process that stopped mid-request cannot know whether the receiver got it.
@@ -136,7 +141,7 @@ export class WebhookService {
     if (data.includeText && data.acknowledgeText !== true) throw new AutomationError(400, 'text_ack_required', 'Including transcript and document text needs a separate confirmation.');
     const id = crypto.randomUUID(), secret = `whsec_${randomBytes(32).toString('hex')}`, now = nowIso();
     this.database.query(`INSERT INTO webhook_subscriptions(id,name,url,secret,event_types,include_text,enabled,external_acknowledged_at,text_acknowledged_at,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(id, data.name, data.url, secret, JSON.stringify(data.eventTypes), Number(data.includeText), Number(data.enabled),
+      VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(id, data.name, data.url, encryptSecret(webhookSecretName(id), secret), JSON.stringify(data.eventTypes), Number(data.includeText), Number(data.enabled),
       external ? now : null, data.includeText ? now : null, now, now);
     return { ...this.get(id), secret };
   }
@@ -159,7 +164,7 @@ export class WebhookService {
   rotateSecret(id: string): WebhookSubscription & { secret: string } {
     this.row(id);
     const secret = `whsec_${randomBytes(32).toString('hex')}`;
-    this.database.query('UPDATE webhook_subscriptions SET secret=?, updated_at=? WHERE id=?').run(secret, nowIso(), id);
+    this.database.query('UPDATE webhook_subscriptions SET secret=?, updated_at=? WHERE id=?').run(encryptSecret(webhookSecretName(id), secret), nowIso(), id);
     return { ...this.get(id), secret };
   }
 
@@ -303,7 +308,7 @@ export class WebhookService {
     try {
       const response = await this.fetcher(subscription.url, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(this.options.timeoutMs), body,
         headers: { 'Content-Type': 'application/json', 'User-Agent': 'OpenPlod-Webhooks/1', 'OpenPlod-Event-Id': delivery.eventId, 'OpenPlod-Delivery-Id': deliveryId,
-          'OpenPlod-Event-Type': (JSON.parse(body) as { type: string }).type, 'OpenPlod-Signature': signWebhook(subscription.secret, timestamp, body), 'Idempotency-Key': delivery.eventId } });
+          'OpenPlod-Event-Type': (JSON.parse(body) as { type: string }).type, 'OpenPlod-Signature': signWebhook(decryptSecret(webhookSecretName(subscription.id), subscription.secret), timestamp, body), 'Idempotency-Key': delivery.eventId } });
       await response.body?.cancel().catch(() => {});
       // Response bodies are never stored: they can contain anything.
       if (response.ok) finish('delivered', response.status, null, Date.now() - started);

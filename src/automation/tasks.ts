@@ -1,6 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import { z } from 'zod';
 import { readSettings } from '../ai/config';
+import { protectSetting } from '../vault/secrets';
 import { AutomationError, localOnly, nowIso, stableId, transportOutcome, type Fetcher } from './common';
 
 /**
@@ -165,7 +166,7 @@ export class TaskService {
         const value = data[key];
         if (value === undefined) continue;
         if (value === '') this.database.query('DELETE FROM user_settings WHERE key=?').run(key);
-        else this.database.query("INSERT INTO user_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')").run(key, value);
+        else this.database.query("INSERT INTO user_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')").run(key, protectSetting(key, value));
       }
     })();
     return this.connectorSettings();

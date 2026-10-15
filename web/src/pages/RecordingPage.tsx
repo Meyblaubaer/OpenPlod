@@ -10,6 +10,7 @@ import { deliverCapture } from '@/lib/outbox-delivery'
 import { OutboxPanel } from '@/components/OutboxPanel'
 import { formatDuration } from '@/lib/utils'
 import { completePendingAndroidShare, readPendingAndroidShare } from '@/lib/android-share'
+import { formatDate, t } from '@/i18n'
 
 type CaptureState = 'idle' | 'requesting' | 'recording' | 'paused' | 'review' | 'uploading' | 'stored'
 
@@ -65,7 +66,7 @@ export function RecordingPage() {
       setState('review')
     }
     void restoreCapture().catch(importError => {
-      setError(importError instanceof Error ? importError.message : 'The shared recording could not be opened.')
+      setError(importError instanceof Error ? importError.message : t('The shared recording could not be opened.'))
     })
   }, [])
 
@@ -126,7 +127,7 @@ export function RecordingPage() {
 
   const startRecording = async () => {
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      setError('Microphone recording is not supported on this device.')
+      setError(t('Microphone recording is not supported on this device.'))
       return
     }
     setState('requesting')
@@ -162,8 +163,8 @@ export function RecordingPage() {
       releaseMicrophone()
       setState('idle')
       setError(permissionError instanceof Error && permissionError.name === 'NotAllowedError'
-        ? 'Microphone access is off. Allow OpenPlod in your system settings, then try again.'
-        : 'The microphone could not be started.')
+        ? t('Microphone access is off. Allow OpenPlod in your system settings, then try again.')
+        : t('The microphone could not be started.'))
     }
   }
 
@@ -209,7 +210,7 @@ export function RecordingPage() {
     try {
       await savePendingCapture(pending)
     } catch {
-      setError('The recording is ready, but an offline copy could not be saved. Export or store it before leaving.')
+      setError(t('The recording is ready, but an offline copy could not be saved. Export or store it before leaving.'))
     }
   }
 
@@ -236,15 +237,15 @@ export function RecordingPage() {
       setState('review')
       setOutboxVersion(v => v + 1)
       setError(uploadError instanceof Error
-        ? `Local recording retained in the outbox. ${uploadError.message}`
-        : 'Local recording retained in the outbox. Check the vault connection and retry.')
+        ? t('Local recording retained in the outbox. {error}', { error: uploadError.message })
+        : t('Local recording retained in the outbox. Check the vault connection and retry.'))
     } finally {
       setProgress(null)
     }
   }
 
   const discard = async () => {
-    if (capture && !window.confirm('Discard this local recording?')) return
+    if (capture && !window.confirm(t('Discard this local recording?'))) return
     if (capture) await removePendingCapture(capture.id).catch(() => undefined)
     if (audioUrl) URL.revokeObjectURL(audioUrl)
     setCapture(null)
@@ -257,7 +258,7 @@ export function RecordingPage() {
   }
 
   const goBack = () => {
-    if ((state === 'recording' || state === 'paused') && !window.confirm('Stop and leave this recording?')) return
+    if ((state === 'recording' || state === 'paused') && !window.confirm(t('Stop and leave this recording?'))) return
     if (state === 'recording' || state === 'paused') stopRecording()
     navigate('/')
   }
@@ -267,9 +268,9 @@ export function RecordingPage() {
   return (
     <div className="capture-page">
       <header className="capture-header">
-        <Button variant="ghost" size="icon" onClick={goBack} aria-label="Back to library" title="Back to library"><ArrowLeft /></Button>
-        <span>{capture?.sourceProvider === 'plaud' ? 'Import Plaud recording' : state === 'review' || state === 'uploading' ? 'Review recording' : 'New recording'}</span>
-        {state === 'review' ? <Button variant="ghost" size="icon" onClick={() => void discard()} aria-label="Discard recording" title="Discard recording"><X /></Button> : <span className="h-10 w-10" />}
+        <Button variant="ghost" size="icon" onClick={goBack} aria-label={t('Back to library')} title={t('Back to library')}><ArrowLeft /></Button>
+        <span>{capture?.sourceProvider === 'plaud' ? t('Import Plaud recording') : state === 'review' || state === 'uploading' ? t('Review recording') : t('New recording')}</span>
+        {state === 'review' ? <Button variant="ghost" size="icon" onClick={() => void discard()} aria-label={t('Discard recording')} title={t('Discard recording')}><X /></Button> : <span className="h-10 w-10" />}
       </header>
 
       <main className="capture-stage">
@@ -277,43 +278,43 @@ export function RecordingPage() {
           <div className="capture-ready">
             <div className="capture-orbit"><Mic aria-hidden="true" /></div>
             <div>
-              <h1>New recording</h1>
+              <h1>{t('New recording')}</h1>
             </div>
-            <button className="record-trigger" type="button" onClick={() => void startRecording()} disabled={state === 'requesting'} aria-label="Start recording">
+            <button className="record-trigger" type="button" onClick={() => void startRecording()} disabled={state === 'requesting'} aria-label={t('Start recording')}>
               {state === 'requesting' ? <Loader2 className="animate-spin" /> : <Mic />}
             </button>
-            <div className="capture-import-option"><span>or</span><PlaudImportDialog variant="outline" /></div>
+            <div className="capture-import-option"><span>{t('or')}</span><PlaudImportDialog variant="outline" /></div>
             <OutboxPanel fromMobile={runtime.mode === 'mobile'} refreshKey={outboxVersion} />
           </div>
         ) : isCapturing ? (
           <div className="capture-live">
-            <div className="capture-state"><span className={state === 'paused' ? 'paused' : ''} />{state === 'paused' ? 'Paused' : 'Recording'}</div>
+            <div className="capture-state"><span className={state === 'paused' ? 'paused' : ''} />{state === 'paused' ? t('Paused') : t('Recording')}</div>
             <div className="capture-timer">{formatDuration(elapsedMs / 1000)}</div>
             <canvas ref={canvasRef} className={state === 'paused' ? 'capture-wave paused' : 'capture-wave'} aria-hidden="true" />
             <div className="capture-controls">
-              <button type="button" className="capture-control secondary" onClick={pauseRecording} aria-label={state === 'paused' ? 'Resume recording' : 'Pause recording'}>
+              <button type="button" className="capture-control secondary" onClick={pauseRecording} aria-label={state === 'paused' ? t('Resume recording') : t('Pause recording')}>
                 {state === 'paused' ? <Play /> : <Pause />}
               </button>
-              <button type="button" className="capture-control stop" onClick={stopRecording} aria-label="Stop recording"><Square /></button>
+              <button type="button" className="capture-control stop" onClick={stopRecording} aria-label={t('Stop recording')}><Square /></button>
             </div>
           </div>
         ) : state === 'stored' ? (
-          <div className="capture-stored" role="status"><span><Check /></span><h1>Stored in your vault</h1><p>Opening the recording...</p></div>
+          <div className="capture-stored" role="status"><span><Check /></span><h1>{t('Stored in your vault')}</h1><p>{t('Opening the recording...')}</p></div>
         ) : (
           <div className="capture-review">
-            {capture?.sourceProvider === 'plaud' && <div className="capture-source"><FileAudio />Plaud audio received</div>}
+            {capture?.sourceProvider === 'plaud' && <div className="capture-source"><FileAudio />{t('Plaud audio received')}</div>}
             <div className="capture-review-time">{formatDuration(elapsedMs / 1000)}</div>
             {audioUrl && <audio className="capture-audio" src={audioUrl} controls preload="metadata" />}
             <div className="capture-fields">
-              <label>Title<Input value={title} onChange={event => setTitle(event.target.value)} maxLength={120} /></label>
-              <label>Context<textarea value={context} onChange={event => setContext(event.target.value)} placeholder="Meeting, idea, voice note..." rows={3} /></label>
+              <label>{t('Title')}<Input value={title} onChange={event => setTitle(event.target.value)} maxLength={120} /></label>
+              <label>{t('Context')}<textarea value={context} onChange={event => setContext(event.target.value)} placeholder={t('Meeting, idea, voice note...')} rows={3} /></label>
             </div>
             <Button size="lg" className="capture-upload" onClick={() => void upload()} disabled={state === 'uploading' || !title.trim()}>
               {state === 'uploading' ? <Loader2 className="animate-spin" /> : <UploadCloud />}
-              {state === 'uploading' ? progress !== null && progress < 1 ? `Sending ${Math.round(progress * 100)}%...` : 'Storing in vault...' : 'Store in desktop vault'}
+              {state === 'uploading' ? progress !== null && progress < 1 ? t('Sending {percent}%...', { percent: Math.round(progress * 100) }) : t('Storing in vault...') : t('Store in desktop vault')}
             </Button>
             {error && <div className="capture-offline" role="alert"><WifiOff /><span>{error}</span></div>}
-            <Button variant="ghost" onClick={() => void discard()} disabled={state === 'uploading'}><RotateCcw />Record again</Button>
+            <Button variant="ghost" onClick={() => void discard()} disabled={state === 'uploading'}><RotateCcw />{t('Record again')}</Button>
           </div>
         )}
         {error && state === 'idle' && <div className="capture-error" role="alert">{error}</div>}
@@ -339,7 +340,7 @@ function slugify(value: string): string {
 
 function defaultTitle(): string {
   const now = new Date()
-  return `Recording ${now.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`
+  return t('Recording {date} {time}', { date: formatDate(now, { month: 'short', day: 'numeric' }), time: formatDate(now, { hour: '2-digit', minute: '2-digit' }) })
 }
 
 function monotonicNow(): number {

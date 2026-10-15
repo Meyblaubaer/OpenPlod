@@ -6,10 +6,11 @@ import { Button } from '@/components/ui/button'
 import { PlaudDeviceAuthorization } from '@/components/PlaudDeviceAuthorization'
 import { api, type DeviceRecording } from '@/lib/api'
 import { getRuntime } from '@/lib/runtime'
+import { t, tn } from '@/i18n'
 import './plaud-import.css'
 
 const bytesLabel = (bytes: number) => bytes < 1024 * 1024
-  ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  ? t('{value} KB', { value: Math.round(bytes / 1024) }) : t('{value} MB', { value: (bytes / 1024 / 1024).toFixed(1) })
 
 export function PlaudImportDialog({ variant = 'default' }: { variant?: 'default' | 'outline' }) {
   const [open, setOpen] = useState(false)
@@ -50,7 +51,7 @@ export function PlaudImportDialog({ variant = 'default' }: { variant?: 'default'
       setRows(result); setSelected([])
     } catch (failure) {
       if (!controller.signal.aborted) {
-        const message = failure instanceof Error ? failure.message : 'Could not read the Plaud. Wake it and try again.'
+        const message = failure instanceof Error ? failure.message : t('Could not read the Plaud. Wake it and try again.')
         setError(message)
         // Surface the authorization flow inline instead of a dead end.
         setNeedsAuthorization(/authoriz/i.test(message))
@@ -78,9 +79,12 @@ export function PlaudImportDialog({ variant = 'default' }: { variant?: 'default'
         setSelected(current => current.filter(value => value !== row.sessionId))
         window.dispatchEvent(new CustomEvent('plaud:sync-complete'))
       }
-      setNotice(`${completed} recording${completed === 1 ? '' : 's'} saved in your vault.`)
+      setNotice(tn(completed, '{count} recording saved in your vault.', '{count} recordings saved in your vault.'))
     } catch (failure) {
-      if (!controller.signal.aborted) setError(`${completed ? `${completed} saved. ` : ''}${failure instanceof Error ? failure.message : 'Import failed.'} Refresh the list before retrying.`)
+      if (!controller.signal.aborted) {
+        const reason = failure instanceof Error ? failure.message : t('Import failed.')
+        setError(completed ? t('{count} saved. {reason} Refresh the list before retrying.', { count: completed, reason }) : t('{reason} Refresh the list before retrying.', { reason }))
+      }
     } finally {
       if (operation.current === controller) { operation.current = null; setBusy(null) }
     }
@@ -92,8 +96,8 @@ export function PlaudImportDialog({ variant = 'default' }: { variant?: 'default'
     try {
       await api.cancelDeviceOperation()
       operation.current?.abort(); operation.current = null
-      setBusy(null); setNotice('Stopped. Any completed imports remain in your vault. Refresh to check their status.')
-    } catch { setError('Could not stop the operation. Keep this window open and retry.') }
+      setBusy(null); setNotice(t('Stopped. Any completed imports remain in your vault. Refresh to check their status.'))
+    } catch { setError(t('Could not stop the operation. Keep this window open and retry.')) }
     finally { setCancelling(false) }
   }
 
@@ -104,7 +108,7 @@ export function PlaudImportDialog({ variant = 'default' }: { variant?: 'default'
       await api.restoreRecording(row.recordingId)
       setRows(current => current?.map(item => item.sessionId === row.sessionId ? { ...item, retentionState: 'active' } : item) ?? null)
       window.dispatchEvent(new CustomEvent('plaud:sync-complete'))
-    } catch { setError('Could not restore the recording. Try again from Trash.') }
+    } catch { setError(t('Could not restore the recording. Try again from Trash.')) }
     finally { setBusy(null) }
   }
 
@@ -114,49 +118,49 @@ export function PlaudImportDialog({ variant = 'default' }: { variant?: 'default'
   const allSelected = newRows.length > 0 && newRows.every(row => selected.includes(row.sessionId))
   const selectedBytes = (rows ?? []).filter(row => selected.includes(row.sessionId) && !row.recordingId).reduce((sum, row) => sum + row.size, 0)
 
-  if (mobile) return <Button asChild variant={variant}><Link to="/devices"><Bluetooth />Get from Plaud</Link></Button>
+  if (mobile) return <Button asChild variant={variant}><Link to="/devices"><Bluetooth />{t('Get from Plaud')}</Link></Button>
 
   return <Dialog.Root open={open} onOpenChange={value => {
     if (!value && busy) return
     setOpen(value)
     if (value) { setRows(null); setSelected([]); setError(''); setNotice(''); setFilter('all'); setNeedsAuthorization(false) }
   }}>
-    <Dialog.Trigger asChild><Button variant={variant} className="plaud-import-trigger" onPointerDown={() => { keyboard.current = false }} onKeyDown={() => { keyboard.current = true }}><Bluetooth aria-hidden="true" />Get from Plaud</Button></Dialog.Trigger>
+    <Dialog.Trigger asChild><Button variant={variant} className="plaud-import-trigger" onPointerDown={() => { keyboard.current = false }} onKeyDown={() => { keyboard.current = true }}><Bluetooth aria-hidden="true" />{t('Get from Plaud')}</Button></Dialog.Trigger>
     <Dialog.Portal>
       <Dialog.Overlay className="plaud-import-overlay" />
       <Dialog.Content className="plaud-import-dialog" data-keyboard={keyboard.current} onEscapeKeyDown={event => { if (busy) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
         <header className="plaud-import-heading">
-          <div><Dialog.Title>Get from Plaud</Dialog.Title><Dialog.Description>{mobile ? 'Note Pro / Via your paired desktop' : 'Note Pro / Direct Bluetooth'}</Dialog.Description></div>
-          <Dialog.Close asChild><Button size="icon" variant="ghost" disabled={!!busy} aria-label="Close Plaud import" title="Close"><X /></Button></Dialog.Close>
+          <div><Dialog.Title>{t('Get from Plaud')}</Dialog.Title><Dialog.Description>{mobile ? t('Note Pro / Via your paired desktop') : t('Note Pro / Direct Bluetooth')}</Dialog.Description></div>
+          <Dialog.Close asChild><Button size="icon" variant="ghost" disabled={!!busy} aria-label={t('Close Plaud import')} title={t('Close')}><X /></Button></Dialog.Close>
         </header>
         <div className="plaud-import-body">
-          <div className="plaud-import-device"><span className="plaud-import-device-icon"><Bluetooth /></span><div><strong>Plaud Note Pro</strong><span>{busy === 'loading' ? 'Connecting and reading device storage...' : rows ? `${rows.length} recording${rows.length === 1 ? '' : 's'} on device` : 'Ready to connect'}</span></div>
-            <Button variant="outline" size={rows ? 'icon' : 'default'} disabled={!!busy} title={rows ? 'Refresh recordings' : undefined} aria-label={rows ? 'Refresh recordings' : undefined} onClick={() => void load()}>{busy === 'loading' ? <Loader2 className="animate-spin" /> : rows ? <RefreshCw /> : <Bluetooth />}{!rows && 'Connect'}</Button>
+          <div className="plaud-import-device"><span className="plaud-import-device-icon"><Bluetooth /></span><div><strong>Plaud Note Pro</strong><span>{busy === 'loading' ? t('Connecting and reading device storage...') : rows ? tn(rows.length, '{count} recording on device', '{count} recordings on device') : t('Ready to connect')}</span></div>
+            <Button variant="outline" size={rows ? 'icon' : 'default'} disabled={!!busy} title={rows ? t('Refresh recordings') : undefined} aria-label={rows ? t('Refresh recordings') : undefined} onClick={() => void load()}>{busy === 'loading' ? <Loader2 className="animate-spin" /> : rows ? <RefreshCw /> : <Bluetooth />}{!rows && t('Connect')}</Button>
           </div>
           {error && <div className="plaud-import-error" role="alert">{error}</div>}
           {notice && <div className="plaud-import-notice" role="status"><Check />{notice}</div>}
           {needsAuthorization && <PlaudDeviceAuthorization variant="dialog" onAuthorized={() => void load()} />}
-          {rows === null ? (needsAuthorization ? null : <div className="plaud-import-empty"><FileAudio /><h3>{busy === 'loading' ? 'Reading your recordings' : 'Bring your recordings home'}</h3><p>{mobile ? 'Keep the Plaud near your paired desktop and wake the device.' : 'Wake your Plaud and keep it near this computer.'}</p><span>Originals stay on the Plaud.</span></div>) : <>
+          {rows === null ? (needsAuthorization ? null : <div className="plaud-import-empty"><FileAudio /><h3>{busy === 'loading' ? t('Reading your recordings') : t('Bring your recordings home')}</h3><p>{mobile ? t('Keep the Plaud near your paired desktop and wake the device.') : t('Wake your Plaud and keep it near this computer.')}</p><span>{t('Originals stay on the Plaud.')}</span></div>) : <>
             <div className="plaud-import-toolbar">
-              <div className="plaud-import-tabs" role="group" aria-label="Recording filter">{[['all', 'All'], ['new', 'New'], ['saved', 'Saved']].map(([value, label]) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}</div>
-              <select aria-label="Sort device recordings" value={sort} onChange={event => setSort(event.target.value)}><option value="device">Device order</option><option value="size">Largest first</option></select>
+              <div className="plaud-import-tabs" role="group" aria-label={t('Recording filter')}>{[['all', t('All')], ['new', t('New')], ['saved', t('Saved')]].map(([value, label]) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}</div>
+              <select aria-label={t('Sort device recordings')} value={sort} onChange={event => setSort(event.target.value)}><option value="device">{t('Device order')}</option><option value="size">{t('Largest first')}</option></select>
             </div>
-            {newRows.length > 0 && <label className="plaud-import-select-all"><input type="checkbox" checked={allSelected} disabled={!!busy} onChange={() => setSelected(current => allSelected ? current.filter(id => !newRows.some(row => row.sessionId === id)) : [...new Set([...current, ...newRows.map(row => row.sessionId)])])} />Select all new<span>{newRows.length}</span></label>}
-            <div className="plaud-import-recordings" aria-label="Device recordings">
+            {newRows.length > 0 && <label className="plaud-import-select-all"><input type="checkbox" checked={allSelected} disabled={!!busy} onChange={() => setSelected(current => allSelected ? current.filter(id => !newRows.some(row => row.sessionId === id)) : [...new Set([...current, ...newRows.map(row => row.sessionId)])])} />{t('Select all new')}<span>{newRows.length}</span></label>}
+            <div className="plaud-import-recordings" aria-label={t('Device recordings')}>
               {visible.map(row => <div className="plaud-import-row" key={row.sessionId}>
-                <label><input type="checkbox" aria-label={`Select recording ${row.sessionId}`} disabled={!!row.recordingId || !!busy} checked={selected.includes(row.sessionId)} onChange={event => setSelected(current => event.target.checked ? [...current, row.sessionId] : current.filter(id => id !== row.sessionId))} /><FileAudio /><span><strong>Recording {row.sessionId}</strong><small>{bytesLabel(row.size)} / {row.retentionState === 'trash' ? 'In Trash' : row.recordingId ? 'Saved in vault' : 'Not imported'}</small></span></label>
-                {row.retentionState === 'trash' ? <Button variant="ghost" size="icon" disabled={!!busy} title="Restore from Trash" aria-label={`Restore recording ${row.sessionId}`} onClick={() => void restore(row)}><RotateCcw /></Button>
-                  : row.recordingId ? <Button asChild variant="ghost" size="icon" disabled={!!busy}><Link onClick={event => { if (busy) event.preventDefault(); else setOpen(false) }} aria-label={`Open recording ${row.sessionId}`} title="Open recording" to={`/recording/${row.recordingId}`}><ArrowUpRight /></Link></Button> : null}
+                <label><input type="checkbox" aria-label={t('Select recording {id}', { id: row.sessionId })} disabled={!!row.recordingId || !!busy} checked={selected.includes(row.sessionId)} onChange={event => setSelected(current => event.target.checked ? [...current, row.sessionId] : current.filter(id => id !== row.sessionId))} /><FileAudio /><span><strong>{t('Recording {id}', { id: row.sessionId })}</strong><small>{bytesLabel(row.size)} / {row.retentionState === 'trash' ? t('In Trash') : row.recordingId ? t('Saved in vault') : t('Not imported')}</small></span></label>
+                {row.retentionState === 'trash' ? <Button variant="ghost" size="icon" disabled={!!busy} title={t('Restore from Trash')} aria-label={t('Restore recording {id}', { id: row.sessionId })} onClick={() => void restore(row)}><RotateCcw /></Button>
+                  : row.recordingId ? <Button asChild variant="ghost" size="icon" disabled={!!busy}><Link onClick={event => { if (busy) event.preventDefault(); else setOpen(false) }} aria-label={t('Open recording {id}', { id: row.sessionId })} title={t('Open recording')} to={`/recording/${row.recordingId}`}><ArrowUpRight /></Link></Button> : null}
               </div>)}
-              {visible.length === 0 && <div className="plaud-import-empty"><Check /><h3>{rows.length ? 'Nothing in this view' : 'No completed recordings'}</h3><p>{rows.length ? 'Choose another filter to see your recordings.' : 'Finish a recording on your Plaud, then refresh.'}</p></div>}
+              {visible.length === 0 && <div className="plaud-import-empty"><Check /><h3>{rows.length ? t('Nothing in this view') : t('No completed recordings')}</h3><p>{rows.length ? t('Choose another filter to see your recordings.') : t('Finish a recording on your Plaud, then refresh.')}</p></div>}
             </div>
           </>}
         </div>
         <footer className="plaud-import-footer">
-          {busy === 'importing' ? <div className="plaud-import-progress" role="status"><Loader2 className="animate-spin" /><span>Importing {progress.current + 1} of {progress.total}<small>Recording {progress.sessionId}</small></span><progress max={progress.total} value={progress.current} aria-label="Completed recordings" /></div>
-            : <div className="plaud-import-retention"><ShieldCheck /><span>{selected.length ? `${selected.length} selected / ${bytesLabel(selectedBytes)}` : 'Originals kept on device'}</span></div>}
-          {busy ? <Button variant="outline" disabled={cancelling || busy === 'restoring'} onClick={() => void cancel()}>{cancelling ? 'Stopping...' : 'Cancel'}</Button>
-            : <Button disabled={!selected.length} onClick={() => void importSelected()}><Download />Import{selected.length ? ` ${selected.length}` : ''}</Button>}
+          {busy === 'importing' ? <div className="plaud-import-progress" role="status"><Loader2 className="animate-spin" /><span>{t('Importing {current} of {total}', { current: progress.current + 1, total: progress.total })}<small>{t('Recording {id}', { id: progress.sessionId })}</small></span><progress max={progress.total} value={progress.current} aria-label={t('Completed recordings')} /></div>
+            : <div className="plaud-import-retention"><ShieldCheck /><span>{selected.length ? t('{count} selected / {size}', { count: selected.length, size: bytesLabel(selectedBytes) }) : t('Originals kept on device')}</span></div>}
+          {busy ? <Button variant="outline" disabled={cancelling || busy === 'restoring'} onClick={() => void cancel()}>{cancelling ? t('Stopping...') : t('Cancel')}</Button>
+            : <Button disabled={!selected.length} onClick={() => void importSelected()}><Download />{selected.length ? t('Import {count}', { count: selected.length }) : t('Import')}</Button>}
         </footer>
       </Dialog.Content>
     </Dialog.Portal>

@@ -24,7 +24,7 @@ const subscription = (service: WebhookService, extra: Record<string, unknown> = 
 const header = (call: Call, name: string) => (call.init.headers as Record<string, string>)[name];
 
 test('subscriptions accept HTTPS or loopback HTTP only, need acknowledgement to leave the computer, and show the secret once', () => {
-  const { service } = fixture();
+  const { service, db } = fixture();
   expect(() => service.create({ name: 'x', url: 'http://example.com/hook', eventTypes: ['job.failed'] })).toThrow();
   expect(() => service.create({ name: 'x', url: 'https://user:pass@example.com/hook', eventTypes: ['job.failed'] })).toThrow();
   expect(() => service.create({ name: 'x', url: 'https://example.com/hook', eventTypes: ['job.failed'] })).toThrow('leaves this computer');
@@ -33,6 +33,10 @@ test('subscriptions accept HTTPS or loopback HTTP only, need acknowledgement to 
   expect(created.secret).toMatch(/^whsec_[0-9a-f]{64}$/);
   expect(created).toMatchObject({ external: true, host: 'example.com', eventTypes: ['job.failed'], enabled: true });
   expect(JSON.stringify(service.list())).not.toContain(created.secret);
+  // Stored encrypted at rest, never in plaintext.
+  const stored = (db.query('SELECT secret FROM webhook_subscriptions WHERE id=?').get(created.id) as { secret: string }).secret;
+  expect(stored).toStartWith('enc:v1:');
+  expect(stored).not.toContain(created.secret);
   const rotated = service.rotateSecret(created.id);
   expect(rotated.secret).not.toBe(created.secret);
 });
