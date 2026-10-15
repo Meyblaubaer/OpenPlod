@@ -4,6 +4,7 @@ import { initializeMobileSync } from '../sync/mobile-schema';
 import { assertVaultSchemaCompatible, recordVaultSchema } from './vault-meta';
 import { ensureImportJournal } from '../library/import-journal';
 import { ensureTombstoneTable } from '../library/purge';
+import { initializeKnowledge } from '../knowledge/schema';
 
 const SCHEMA_VERSION = 4;
 
@@ -175,5 +176,6 @@ export function initializeDatabase() {
   ensureImportJournal(sqlite);
   ensureTombstoneTable(sqlite);
   recordVaultSchema(sqlite);
+  sqlite.transaction(() => initializeKnowledge(sqlite))();
   sqlite.exec('PRAGMA optimize');
 }

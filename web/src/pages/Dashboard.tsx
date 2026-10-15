@@ -46,6 +46,8 @@ import { Button } from "@/components/ui/button";
 import { api, type Recording } from "@/lib/api";
 import { formatDuration } from "@/lib/utils";
 import { BatchTranscribe } from '@/components/BatchTranscribe'
+import { COLLECTIONS_EVENT, CollectionContextSubmenu, CollectionDropdownSubmenu, CollectionNameDialog } from '@/components/RecordingCollections'
+import { knowledgeApi, type RecordingCollection } from '@/lib/knowledge'
 
 export function Dashboard() {
   const [recordings, setRecordings] = useState<Recording[]>([]),
@@ -64,6 +66,20 @@ export function Dashboard() {
     location = useLocation();
   const retention = params.get("view") === "trash" ? "trash" : "active";
   const starred = params.get("view") === "starred";
+  const collectionParam = params.get("collection");
+  const collectionId = retention === "active" && collectionParam && /^[0-9a-f-]{36}$/i.test(collectionParam) ? collectionParam : null;
+  const [collections, setCollections] = useState<RecordingCollection[]>([]);
+  const [naming, setNaming] = useState<{ mode: "create"; recordingId?: string } | { mode: "rename"; collection: RecordingCollection } | null>(null);
+  const activeCollection = collections.find((row) => row.id === collectionId) ?? null;
+  const loadCollections = useCallback(async () => {
+    try { setCollections(await knowledgeApi.collections()); } catch { /* The library still works without collections. */ }
+  }, []);
+  useEffect(() => {
+    void loadCollections();
+    window.addEventListener(COLLECTIONS_EVENT, loadCollections);
+    return () => window.removeEventListener(COLLECTIONS_EVENT, loadCollections);
+  }, [loadCollections]);
+  const collectionsChanged = () => window.dispatchEvent(new Event(COLLECTIONS_EVENT));
   const revision = useRef(0);
   const [tagRecording, setTagRecording] = useState<Recording | null>(null);
   const [tagRefresh, setTagRefresh] = useState(0);
@@ -96,7 +112,7 @@ export function Dashboard() {
     setLoading(true);
     setError("");
     try {
-      const rows = await api.getRecordings({ retention, limit: "100" });
+      const rows = await api.getRecordings({ retention, limit: "100", ...(collectionId ? { collection: collectionId } : {}) });
       if (ticket === revision.current) {
         setRecordings(rows);
         setMore(rows.length === 100);
@@ -106,7 +122,7 @@ export function Dashboard() {
     } finally {
       if (ticket === revision.current) setLoading(false);
     }
-  }, [retention]);
+  }, [retention, collectionId]);
   useEffect(() => {
     void load();
     window.addEventListener("plaud:sync-complete", load);
@@ -172,6 +188,7 @@ export function Dashboard() {
         retention,
         limit: "100",
         offset: String(recordings.length),
+        ...(collectionId ? { collection: collectionId } : {}),
       });
       if (ticket === revision.current) {
         setRecordings((current) => [...current, ...rows]);
@@ -205,6 +222,37 @@ export function Dashboard() {
       setError((e as Error).message);
     }
   };
+  /** Add to or remove from a collection; a stale revision reloads the collections and says so. */
+  const toggleCollection = async (row: Recording, collection: RecordingCollection, member: boolean) => {
+    setError("");
+    try {
+      if (member) await knowledgeApi.addToCollection(collection.id, [row.id], collection.revision);
+      else await knowledgeApi.removeFromCollection(collection.id, [row.id], collection.revision);
+      setRecordings((current) => current
+        .map((item) => item.id === row.id ? { ...item, collectionIds: member ? [...new Set([...(item.collectionIds ?? []), collection.id])] : (item.collectionIds ?? []).filter((id) => id !== collection.id) } : item)
+        .filter((item) => !(collectionId === collection.id && !member && item.id === row.id)));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      collectionsChanged();
+    }
+  };
+  const deleteCollection = async (collection: RecordingCollection) => {
+    if (!window.confirm(`Delete the collection "${collection.name}"? Its recordings are kept.`)) return;
+    try {
+      await knowledgeApi.deleteCollection(collection.id, collection.revision);
+      collectionsChanged();
+      navigate("/recordings");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  const collectionMenu = (row: Recording) => ({
+    collections,
+    memberOf: row.collectionIds ?? [],
+    onToggle: (collection: RecordingCollection, member: boolean) => void toggleCollection(row, collection, member),
+    onCreate: () => setNaming({ mode: "create", recordingId: row.id }),
+  });
   const filters = [
     { id: "all", label: "All", icon: FileAudio },
     { id: "voice", label: "Voice", icon: Mic },
@@ -228,7 +276,9 @@ export function Dashboard() {
                   ? "Trash"
                   : starred
                     ? "Starred"
-                    : "Recordings"}
+                    : collectionId
+                      ? activeCollection?.name ?? "Collection"
+                      : "Recordings"}
               </h1>
               <p>
                 {loading && !recordings.length
@@ -236,7 +286,14 @@ export function Dashboard() {
                   : `${filtered.length}${more ? "+" : ""} recording${filtered.length === 1 ? "" : "s"}`}
               </p>
             </div>
-            <PlaudImportDialog />
+            {collectionId && activeCollection ? (
+              <div className="studio-collection-tools">
+                <Button variant="outline" size="sm" onClick={() => setNaming({ mode: "rename", collection: activeCollection })}><Pencil />Rename</Button>
+                <Button variant="ghost" size="sm" onClick={() => void deleteCollection(activeCollection)}><Trash2 />Delete collection</Button>
+              </div>
+            ) : (
+              <PlaudImportDialog />
+            )}
           </header>
           {retention === "active" && (
             <BatchTranscribe recordings={recordings} onFinished={() => void load()} />
@@ -326,10 +383,14 @@ export function Dashboard() {
                   ? "No matching recordings"
                   : retention === "trash"
                     ? "Trash is empty"
-                    : "No recordings yet"}
+                    : collectionId
+                      ? "No recordings in this collection"
+                      : "No recordings yet"}
               </h2>
               {retention === "trash" ? (
                 <p>Deleted recordings remain recoverable for 30 days.</p>
+              ) : collectionId ? (
+                <p>Right-click a recording, or use its actions menu, and choose Add to collection.</p>
               ) : (
                 <Button asChild variant="outline">
                   <Link to="/record">
@@ -430,6 +491,7 @@ export function Dashboard() {
                             <DropdownMenu.Item onSelect={() => editTags(row)}>
                               <Tags />Edit tags
                             </DropdownMenu.Item>
+                            <CollectionDropdownSubmenu {...collectionMenu(row)} />
                             <DropdownMenu.Item asChild>
                               <Link to={`/recording/${row.id}`}>
                                 <Pencil />Edit recording
@@ -453,6 +515,7 @@ export function Dashboard() {
                   <ContextMenu.Content className="action-menu" onCloseAutoFocus={event => { if (tagEditorOpen.current) event.preventDefault(); }}>
                     <ContextMenu.Item onSelect={() => choose(row.id)}><Play />Open preview</ContextMenu.Item>
                     <ContextMenu.Item onSelect={() => editTags(row)}><Tags />Edit tags</ContextMenu.Item>
+                    <CollectionContextSubmenu {...collectionMenu(row)} />
                     <ContextMenu.Item onSelect={() => navigate(`/recording/${row.id}`)}><Pencil />Edit recording</ContextMenu.Item>
                     <ContextMenu.Item onSelect={() => navigate(`/ai?recording=${row.id}`)}><MessageSquare />Ask AI</ContextMenu.Item>
                   </ContextMenu.Content>
@@ -495,6 +558,26 @@ export function Dashboard() {
         setLoading(false);
         setTagRefresh(value => value + 1);
       }} />}
+      {naming && (
+        <CollectionNameDialog
+          title={naming.mode === "rename" ? "Rename collection" : "New collection"}
+          initial={naming.mode === "rename" ? naming.collection.name : ""}
+          onClose={() => setNaming(null)}
+          onSubmit={async (name) => {
+            if (naming.mode === "rename") {
+              await knowledgeApi.updateCollection(naming.collection.id, { name, revision: naming.collection.revision });
+            } else {
+              const created = await knowledgeApi.createCollection(name);
+              if (naming.recordingId) {
+                const recordingId = naming.recordingId;
+                await knowledgeApi.addToCollection(created.id, [recordingId], created.revision);
+                setRecordings((current) => current.map((item) => item.id === recordingId ? { ...item, collectionIds: [...(item.collectionIds ?? []), created.id] } : item));
+              }
+            }
+            collectionsChanged();
+          }}
+        />
+      )}
       <Dialog.Root open={filtersOpen} onOpenChange={setFiltersOpen}>
         <Dialog.Portal>
           <Dialog.Overlay className="mobile-filter-overlay" />

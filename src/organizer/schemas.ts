@@ -35,5 +35,11 @@ export const markdownExportSchema = z.object({
   dryRun: z.boolean().default(false),
   /** Documents whose exported file may be replaced or recreated despite an external change. */
   overwrite: z.array(identifier).max(1000).default([]),
+  /** Copy the cited recording's audio and/or the exact cited transcript version into `attachments/`. */
+  attachments: z.object({ audio: z.boolean().default(false), transcript: z.boolean().default(false) }).strict().default({ audio: false, transcript: false }),
+  /** Attachments (`audio:<recordingId>` or `transcript:<versionId>`) that may be replaced despite an external change. */
+  overwriteAttachments: z.array(z.string().regex(/^(audio|transcript):[0-9a-f-]{36}$/)).max(1000).default([]),
   confirm: z.literal(true).optional(),
 }).strict().refine(value => value.dryRun || value.confirm === true, { message: 'Confirm the export, or request a dry run first', path: ['confirm'] });
+/** Choose (or clear, with null) the export folder from the app. Always needs explicit confirmation. */
+export const exportFolderSchema = z.object({ path: z.string().trim().min(1).max(4096).refine(value => !value.includes('\0'), 'Invalid path').nullable(), confirm: z.literal(true) }).strict();

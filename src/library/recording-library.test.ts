@@ -211,6 +211,45 @@ describe('recording library', () => {
     expect(confirmed.status).toBe(200);
     expect(await Bun.file(imported.recording.filePath).exists()).toBe(false);
   });
+
+  test('lists recordings by collection, and a purge removes collection membership (KB-01)', async () => {
+    const { RecordingCollections } = await import('../knowledge/collections');
+    const collections = new RecordingCollections(sqlite);
+    const ids: string[] = [];
+    for (const name of ['collection-a.m4a', 'collection-b.m4a']) {
+      const sourcePath = join(testRoot, name);
+      writeFileSync(sourcePath, `${name}-audio`);
+      ids.push((await importRecordingFile({ sourcePath, provenance: { sourceProvider: 'upload', sourceTransport: 'upload' } })).recording.id);
+    }
+    const collection = collections.create({ name: `Library ${crypto.randomUUID()}` });
+    collections.add(collection.id, { recordingIds: [ids[0]], revision: 1 });
+    const listed = await (await recordingsApi.request(`/?collection=${collection.id}`)).json() as { data: { id: string; collectionIds: string[] }[]; pagination: { total: number } };
+    expect(listed.data.map(row => row.id)).toEqual([ids[0]]);
+    expect(listed.data[0].collectionIds).toEqual([collection.id]);
+    expect(listed.pagination.total).toBe(1);
+    expect((await recordingsApi.request('/?collection=not-a-uuid')).status).toBe(400);
+    await softDeleteRecording(ids[0]);
+    expect(((await (await recordingsApi.request(`/?collection=${collection.id}`)).json()) as { data: unknown[] }).data).toEqual([]);
+    expect(collections.get(collection.id).recordingCount).toBe(0);
+    await recordingsApi.request(`/${ids[0]}?permanent=true&confirm=true`, { method: 'DELETE' });
+    expect(collections.membership([ids[0]]).size).toBe(0);
+  });
+
+  test('reprocess honours Idempotency-Key and reports the job (KB-06)', async () => {
+    const sourcePath = join(testRoot, 'idempotent-reprocess.m4a');
+    writeFileSync(sourcePath, 'idempotent-reprocess-audio');
+    const { recording } = await importRecordingFile({ sourcePath, provenance: { sourceProvider: 'upload', sourceTransport: 'upload' } });
+    const send = (key: string, body = '') => recordingsApi.request(`/${recording.id}/reprocess`, { method: 'POST', headers: { 'Idempotency-Key': key }, body });
+    const first = await (await send('reprocess-key-1')).json() as { data: { jobId: string; replayed: boolean } };
+    expect(first.data.replayed).toBe(false);
+    const again = await (await send('reprocess-key-1')).json() as { data: { jobId: string; state: string; replayed: boolean } };
+    expect(again.data).toEqual({ jobId: first.data.jobId, state: 'pending', replayed: true });
+    const conflict = await send('reprocess-key-1', JSON.stringify({ transcriptionLanguage: 'fr' }));
+    expect(conflict.status).toBe(409);
+    expect((await send('reprocess-key-2')).status).toBe(409);
+    expect((await recordingsApi.request(`/${crypto.randomUUID()}/reprocess`, { method: 'POST' })).status).toBe(404);
+    expect((await recordingsApi.request(`/${recording.id}/reprocess`, { method: 'POST', body: '{"chatProvider":"openai"}' })).status).toBe(400);
+  });
 });
 
 describe('mobile pairing', () => {

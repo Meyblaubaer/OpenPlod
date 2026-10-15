@@ -114,7 +114,7 @@ A saved view stores a named set of `GET /documents` filters: `folderId`, `view`,
 
 ## Managed Markdown Export
 
-A one-way export of every active note into a folder the server owner chooses, such as an Obsidian vault. The folder is configured only on the server, with `OPENPLOD_EXPORT_DIR` (an absolute path to an existing folder); there is no API for choosing a path. Without it, `GET /exports/markdown` reports `configured: false` and a run returns `503`.
+A one-way export of every active note into a chosen folder, such as an Obsidian vault. `OPENPLOD_EXPORT_DIR` (an absolute path to an existing folder) always wins and locks the folder (`source: "env"`, `locked: true`). Otherwise the app chooses it with `PUT /exports/markdown/folder` `{ "path": "/abs/folder", "confirm": true }` (`path: null` forgets it): the folder must exist, be absolute, not be a drive root, and lie outside the private vault (database and audio library); the request needs `confirm: true` and, like every `/api` route, the vault token. The desktop app picks the folder with a native dialog (Tauri command `pick_export_folder`); a browser types the path. An API token can therefore also set the folder, only through this endpoint with explicit confirmation; MCP cannot reach it. While `OPENPLOD_EXPORT_DIR` is set the endpoint returns `409 export_root_locked`. Without a folder, `GET /exports/markdown` reports `configured: false` and a run returns `503`. Status: `{ configured, root, source, locked, lastExportedAt, documentCount, attachmentCount, error }`.
 
 Each note becomes `<folder path>/<title>.md`, following the note's folder tree, with names made portable (no path separators, reserved or control characters). The file starts with YAML front matter: `openplod_id`, `title`, `revision`, `updated`, `tags`, and when present `source_recording`, `source_version`, `source_origin`, and `properties`. The body is the saved Markdown, unchanged.
 
@@ -131,7 +131,9 @@ Each note becomes `<folder path>/<title>.md`, following the note's folder tree, 
 
 A conflict is only resolved by naming that note in `overwrite` on a confirmed run, which replaces or recreates its file; symlinks are never followed or replaced. Run `{ "dryRun": true }` first: it reports exactly the same actions without writing anything. A real run requires `confirm: true`. Writes go through a temporary file and an atomic rename, and only one export runs at a time (`409 export_running`). An invalid manifest stops the run with `409 manifest_invalid` before anything is written; move it aside to start over. If a run fails midway, the manifest still records the files it wrote, so the next run does not treat them as foreign.
 
-Response: `{ root, dryRun, exportedAt, counts: { created, updated, moved, unchanged, conflict, orphaned }, items: [{ documentId, title, path, action, reason? }] }`. Attachments are not exported; notes reference their source recording and transcript version by id.
+Response: `{ root, dryRun, exportedAt, counts: { created, updated, moved, unchanged, conflict, orphaned }, items: [{ documentId, title, path, action, reason?, kind?, attachmentKey? }] }`.
+
+**Attachments.** `attachments: { "audio": true, "transcript": true }` copies, for every note written from a recording, the recording's stored audio and the exact cited transcript version (with small front matter naming the recording and version) into `attachments/`. The note's front matter lists them under `attachments`. Each attachment is written once per run however many notes cite it, recorded in the manifest under `attachments` (keyed `audio:<recordingId>` or `transcript:<versionId>`) with its path and SHA-256, and follows the same rules as notes: never written over an external change unless named in `overwriteAttachments`, never replacing a file OpenPlod did not write (a suffix is used), kept when no note cites it any more (`orphaned`). Recordings in Trash and missing audio files are skipped. Audio is compared by its vault fingerprint (SHA-256) and the file on disk is re-hashed on each run.
 
 ## Document Suggestions
 
@@ -207,14 +209,52 @@ Saved chat conversations live under `/api/ai`, outside the versioned `/api/v1` c
 | --- | --- | --- |
 | GET | `/conversations?archived=false` | Up to 30 conversations, newest activity first: `{ id, title, question, recordingIds, createdAt, turns, archived }`. `archived=true` lists the archive instead |
 | GET | `/conversations/:id` | Every saved answer, with sources and citations |
-| PATCH | `/conversations/:id` | `{ title?: string \| null, archived?: boolean }`; metadata only, saved answers are never changed. `title: null` returns to the first question |
+| PATCH | `/conversations/:id` | `{ title?: string \| null, archived?: boolean, pinnedRecordingIds?: string[], contextNote?: string \| null }`; metadata only, saved answers are never changed. `title: null` returns to the first question. Pins and the note can be set before the first question |
+| GET | `/conversations/:id/context` | `{ id, pinnedRecordingIds, contextNote }` |
 | GET | `/conversations/:id/export?format=md` | The complete conversation as Markdown, each cited quote resolved to its recording, timestamp, and transcript version; `format=json` returns every saved answer |
 
-`question` is the latest question asked. Asking a follow-up question in an archived conversation returns it to the main list. Conversations whose sources are in Trash are not listed or exported.
+`question` is the latest question asked. Asking a follow-up question in an archived conversation returns it to the main list.
+
+`POST /api/ai/ask` accepts an empty `recordingIds`: up to 16 passages are then retrieved across the vault with hybrid search (Trash excluded) and only those are sent. Pinned recordings are always included in full, and the project note is sent as `projectContext`, marked as untrusted background that can never be cited. Answers carry `retrieval: { mode, pinnedRecordingIds, sentRecordingIds, usedRecordingIds, contextNote, embeddingModel }`, sources carry `via`, `end`, `segmentStart`/`segmentEnd`, and `matchedBy`, and `followUps` holds up to three suggested questions that the app shows but never sends by itself. Conversations whose sources are in Trash are not listed or exported.
+
+## Recording Collections
+
+Named, revision-checked sets of recordings (KB-01). Names are 1-80 characters and unique case-insensitively; up to 500 collections. `recordingCount` counts active recordings only: a recording in Trash stays a member and reappears when restored; purging it removes it from every collection.
+
+| Method | Path | Request / behavior |
+| --- | --- | --- |
+| GET | `/collections` | `[{ id, name, description, revision, createdAt, updatedAt, recordingCount }]` |
+| POST | `/collections` | `{ name, description? }`, `201`; a duplicate name is `409 collection_exists` |
+| GET | `/collections/:id` | The collection plus `recordingIds` (active, newest first) |
+| PATCH | `/collections/:id` | `{ name?, description?, revision }` |
+| DELETE | `/collections/:id` | `{ revision }`; recordings are untouched |
+| POST | `/collections/:id/recordings` | `{ recordingIds, revision }`; only active recordings |
+| DELETE | `/collections/:id/recordings` | `{ recordingIds, revision }` |
+
+Every change bumps `revision`; a stale one is `409 revision_conflict`. `GET /api/recordings?collection=<id>` lists one collection, and list rows carry `collectionIds`.
+
+## Hybrid Search
+
+`GET /search?q=&mode=hybrid&source=all&limit=20` (KB-04) searches the **current transcript version of active recordings** and **active notes**, cut into passages. Transcript passages are runs of whole segments carrying the inclusive `segmentStart`/`segmentEnd` index range and `startTime`/`endTime` taken from those segments; text without complete segments gets `null` times, never estimates. Each result names the exact `versionId`.
+
+```json
+{ "id": "…", "sourceType": "transcript", "recordingId": "…", "recordingTitle": "Budget review.m4a", "versionId": "…", "documentId": null, "documentTitle": null,
+  "segmentStart": 0, "segmentEnd": 1, "startTime": 0, "endTime": 40, "text": "…", "score": 0.73, "scores": { "fts": 1, "vector": 0.45 }, "matchedBy": ["fts", "vector"] }
+```
+
+`mode` is `hybrid`, `lexical` (FTS5 bm25 only), or `semantic` (vectors only). Up to 50 candidates come from each retriever; the hybrid score is `0.5 × bm25/best bm25 + 0.5 × max(0, cosine)`. The response also has `embedding: { model, kind: "lexical" | "local" | "cloud", fallback, note }` and `index: { sources, passages, pending }`. A search first indexes up to 25 new or changed sources.
+
+Embeddings are local by default: `auto` uses an installed Ollama embedding model (`nomic-embed-text` unless changed), otherwise a built-in, offline **lexical** fallback (signed hashed bag-of-words, SMART `lnc.ltc` TF-IDF; its vector matches are limited to passages sharing a word, so it is not semantic). OpenAI (`text-embedding-3-small`) or Mistral (`mistral-embed`) embeddings are used only when selected with `PUT /search/settings { "embeddingProvider": "openai", "cloudOptIn": true, "confirmCloud": true }`, a key is configured, and local-only mode is off; otherwise the lexical index is used and `note` says why. `GET /search/status` reports settings and counts; `POST /search/reindex { maxSources?, rebuild? }` indexes now.
+
+Vectors are stored in SQLite as float32 BLOBs per passage and model, with a SHA-256 of the exact source text. Database triggers delete cached passages and vectors when a recording goes to Trash or is purged, when a new transcript version becomes current, and when a note is edited, trashed, or purged; every query also re-checks that each passage still belongs to the current version of an active source.
+
+## Recording Suggestions and Recurring Topics
+
+`POST /recordings/:id/suggestions { "consent": true }` returns `{ recordingId, revision, versionId, title, tags, provider, model, truncated }` from the analysis provider. Nothing changes; applying is an ordinary `PATCH /api/recordings/:id` with the revision. `GET /topics?days=30` counts recording tags and transcript words shared by at least two recent recordings, locally. `POST /topics/summary { topic, days, consent: true }` retrieves matching passages from those recordings and returns a cited Markdown **preview** `{ topic, markdown, summary, sources, citations, provider, model }`; every quote must be an exact substring of a supplied passage. Saving it is an ordinary `POST /documents`.
 
 ## Processing Jobs
 
-`/api/v1/jobs` is a stable, read-mostly view over the durable processing queue. It never submits work: transcription and forwarding jobs are created by import, reprocess, and batch flows, which keep their per-recording idempotency (a retried submission for a recording with a queued or running job returns that job rather than creating a second one or a second paid call). Fields may be added within `/api/v1`; existing fields keep their meaning.
+`/api/v1/jobs` is a stable view over the durable processing queue. `POST /jobs` creates a transcription (below); other jobs are created by import, reprocess, analyze, and batch flows, which keep their per-recording idempotency (a retried submission for a recording with a queued or running job returns that job rather than creating a second one or a second paid call). Fields may be added within `/api/v1`; existing fields keep their meaning.
 
 ```json
 {
@@ -236,6 +276,10 @@ Saved chat conversations live under `/api/ai`, outside the versioned `/api/v1` c
 `state` is `pending`, `running`, `complete`, `failed`, or `cancelled`. `GET /jobs` accepts `state`, `type`, `recordingId`, `offset`, and `limit` (maximum 100) and returns `{ jobs, total, offset, limit, stats }`. Unknown ids return `404` with `code: "job_not_found"`; cancelling a finished job returns `409` with `code: "job_not_cancellable"`. Cancelling affects only the named job, never other work on the same recording.
 
 After a restart, a job interrupted before the provider confirmed receipt is marked `failed` (and its recording shows the failure) rather than resubmitted, because the provider may already have billed it. A job with a known remote id resumes polling. Finished jobs are kept for 30 days (at most 1,000) and pruned at startup.
+
+**Creating a transcription.** `POST /jobs { "type": "process-recording", "recordingId", "options"?, "confirm": true, "acceptCloudProvider"?, "dryRun"?, "idempotencyKey"? }`. `dryRun` only returns `{ plan: { provider, model, profile, local, requiresCloudConsent } }`. A cloud provider needs `acceptCloudProvider: true` (`409 cloud_consent_required` otherwise); `options` may override `transcription*` settings only. **Idempotency:** an `Idempotency-Key` header (or `idempotencyKey`, 1-128 visible ASCII characters) makes a retry with the same request return the same job (`200`, `replayed: true`) whatever its state; the same key with a different request is `409 idempotency_conflict`. `POST /api/recordings/:id/reprocess` accepts the same header and now returns `{ data: { jobId, state, replayed } }`. Without a key, a second submission while one is queued or running is `409`.
+
+**Analysis jobs.** `POST /api/recordings/:id/analyze` runs through the queue as an `analyze-recording` job (priority 5, `provider` = analysis provider), so it is listed and cancellable here. The request waits up to two minutes and then answers `202 { jobId, state }`. Auto-summary after transcription still runs inside the `process-recording` job.
 
 The older `GET /api/jobs`, `POST /api/jobs/:id/cancel`, `POST /api/jobs/:id/resume`, and `PATCH /api/jobs/:id` keep their shape; job objects there gain an optional `startedAt`.
 

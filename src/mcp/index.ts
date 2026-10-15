@@ -2,7 +2,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { createMcpServer } from './server';
+import { createMcpServer, parseScopes } from './server';
 import { OpenPlodClient } from './client';
 
 async function main() {
@@ -14,13 +14,15 @@ async function main() {
     token = (await readFile(file, 'utf8')).trim();
   }
   const client = new OpenPlodClient(process.env.OPENPLOD_URL || 'http://127.0.0.1:3487', token);
-  const server = createMcpServer(client, process.env.OPENPLOD_MCP_WRITE === '1');
+  const server = createMcpServer(client, parseScopes(process.env));
   const stop = () => { void server.close().finally(() => process.exit(0)); };
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
   await server.connect(new StdioServerTransport());
 }
 
-if (import.meta.main) main().catch(() => {
-  console.error('OpenPlod MCP could not start. Check OPENPLOD_URL and a private API token or OPENPLOD_TOKEN_FILE.');
+if (import.meta.main) main().catch(error => {
+  // Scope errors carry no secret and say exactly what to fix; anything else stays generic.
+  if (error instanceof Error && error.message.startsWith('Unknown OPENPLOD_MCP_SCOPES')) console.error(error.message);
+  else console.error('OpenPlod MCP could not start. Check OPENPLOD_URL and a private API token or OPENPLOD_TOKEN_FILE.');
   process.exitCode = 1;
 });

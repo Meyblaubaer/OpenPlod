@@ -5,6 +5,7 @@ import {
   Bluetooth,
   ChevronRight,
   FileText,
+  Folder,
   FolderHeart,
   HardDrive,
   Home,
@@ -37,6 +38,8 @@ import { api } from "@/lib/api";
 import { getRuntime, apiUrl, authenticatedHeaders } from "@/lib/runtime";
 import { useTheme } from "@/hooks/useTheme";
 import { buildInfo, buildLabel } from "@/lib/build-info";
+import { knowledgeApi, type RecordingCollection } from "@/lib/knowledge";
+import { COLLECTIONS_EVENT } from "./RecordingCollections";
 
 const nav = [
   { to: "/", icon: FolderHeart, label: "Recordings" },
@@ -63,10 +66,17 @@ export function Layout() {
   const clearMessageTimer = useRef<number | null>(null);
   const pageScrollRef = useRef<HTMLElement>(null);
   const captureMode = location.pathname === "/record";
-  const libraryView =
-    location.pathname === "/recordings"
-      ? new URLSearchParams(location.search).get("view")
-      : null;
+  const libraryParams = location.pathname === "/recordings" ? new URLSearchParams(location.search) : null;
+  const activeCollection = libraryParams?.get("collection") ?? null;
+  const libraryView = libraryParams ? libraryParams.get("view") ?? (activeCollection ? "collection" : null) : null;
+  const [collections, setCollections] = useState<RecordingCollection[]>([]);
+  useEffect(() => {
+    let disposed = false;
+    const load = () => knowledgeApi.collections().then(rows => { if (!disposed) setCollections(rows); }).catch(() => {});
+    void load();
+    window.addEventListener(COLLECTIONS_EVENT, load);
+    return () => { disposed = true; window.removeEventListener(COLLECTIONS_EVENT, load); };
+  }, []);
   useEffect(() => {
     let disposed = false;
     const load = () =>
@@ -212,6 +222,24 @@ export function Layout() {
               <Trash2 />
               <span>Trash</span>
             </Link>
+            {collections.length > 0 && (
+              <nav className="sidebar-collections" aria-label="Recording collections">
+                <small>Collections</small>
+                {collections.slice(0, 30).map(collection => (
+                  <Link
+                    key={collection.id}
+                    to={`/recordings?collection=${collection.id}`}
+                    aria-current={activeCollection === collection.id ? "page" : undefined}
+                    className={`nav-item ${activeCollection === collection.id ? "active" : ""}`}
+                    title={collection.name}
+                  >
+                    <Folder />
+                    <span>{collection.name}</span>
+                    <small className="nav-count">{collection.recordingCount}</small>
+                  </Link>
+                ))}
+              </nav>
+            )}
             <div className="vault-state">
               <HardDrive />
               {runtime.mode === "desktop"

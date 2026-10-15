@@ -31,6 +31,8 @@ export interface Recording {
   forwardingStatus: string
   forwardingRunId?: string | null
   forwardingError?: string | null
+  /** Recording collections this recording belongs to (list endpoints only). */
+  collectionIds?: string[]
 }
 
 export interface TranscriptWord {
@@ -492,6 +494,7 @@ interface RawRecording {
   forwardingStatus?: string
   forwardingRunId?: string | null
   forwardingError?: string | null
+  collectionIds?: string[]
 }
 
 interface RawStats {
@@ -581,6 +584,7 @@ function mapRecording(r: RawRecording): Recording {
     forwardingStatus: r.forwardingStatus ?? 'not_configured',
     forwardingRunId: r.forwardingRunId,
     forwardingError: r.forwardingError,
+    ...(r.collectionIds ? { collectionIds: r.collectionIds } : {}),
   }
 }
 

@@ -20,7 +20,7 @@ export function createOrganizerApi(store: OrganizerStore, delivery = new NoteDel
     if (error instanceof OrganizerError) return c.json({ success: false, code: error.code, error: error.message }, error.status);
     return c.json({ success: false, code: 'storage_error', error: 'The note operation could not be completed. Your last saved version is retained.' }, 500);
   });
-  app.get('/', c => c.json({ success: true, data: { schemaVersion: '1', capabilities: ['folders', 'documents', 'transcript-snapshots', 'versions', 'deliveries', 'tags', 'properties', 'sources', 'backlinks', 'jobs', 'views', 'markdown-export', 'suggestions'], markdownLimitBytes: 524288, trashDays: 30 } }));
+  app.get('/', c => c.json({ success: true, data: { schemaVersion: '1', capabilities: ['folders', 'documents', 'transcript-snapshots', 'versions', 'deliveries', 'tags', 'properties', 'sources', 'backlinks', 'jobs', 'views', 'markdown-export', 'markdown-export-attachments', 'export-folder', 'suggestions'], markdownLimitBytes: 524288, trashDays: 30 } }));
   app.get('/document-templates', c => c.json({ success: true, data: documentTemplateCatalog() }));
   app.get('/folders', c => c.json({ success: true, data: store.folders() }));
   app.get('/tags', c => c.json({ success: true, data: store.tags() }));
@@ -33,6 +33,8 @@ export function createOrganizerApi(store: OrganizerStore, delivery = new NoteDel
   });
   app.get('/exports/markdown', async c => c.json({ success: true, data: await exporter.status() }));
   app.post('/exports/markdown', async c => c.json({ success: true, data: await exporter.run(await c.req.json()) }));
+  // Token-protected like every /api route, and requires confirm: true. Locked while OPENPLOD_EXPORT_DIR is set.
+  app.put('/exports/markdown/folder', async c => c.json({ success: true, data: await exporter.setFolder(await c.req.json()) }));
   app.get('/recordings/:id/transcript-versions', c => c.json({ success: true, data: store.transcriptVersions(c.req.param('id')) }));
   app.get('/transcript-versions/:id', c => c.json({ success: true, data: store.transcriptVersion(c.req.param('id')) }));
   app.get('/transcript-versions/:id/backlinks', c => c.json({ success: true, data: store.backlinks(c.req.param('id')) }));

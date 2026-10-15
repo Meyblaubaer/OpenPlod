@@ -46,6 +46,8 @@ import {
 } from '../library/recording-library';
 import { forwardRecording } from '../library/forwarding';
 import { queueRecordingProcessing } from '../library/processing';
+import { JobSubmitError, submitTranscription } from '../jobs/submit';
+import { RecordingCollections } from '../knowledge/collections';
 
 const app = new Hono();
 let bookmarkStore: RecordingBookmarks | undefined;
@@ -67,6 +69,8 @@ app.get('/', async (c) => {
   const type = c.req.query('type');
   const search = c.req.query('search');
   const retention = c.req.query('retention') === 'trash' ? 'trash' : 'active';
+  const collection = c.req.query('collection');
+  if (collection !== undefined && !z.string().uuid().safeParse(collection).success) return c.json({ success: false, error: 'Unknown collection.' }, 400);
 
   try {
     const conditions = [];
@@ -74,6 +78,8 @@ app.get('/', async (c) => {
     if (type) conditions.push(eq(recordings.recordingType, type));
     if (search) conditions.push(like(recordings.originalFilename, `%${search}%`));
     conditions.push(eq(recordings.retentionState, retention));
+    // KB-01: recordings in one collection.
+    if (collection) conditions.push(sql`${recordings.id} IN (SELECT recording_id FROM recording_collection_items WHERE collection_id = ${collection})`);
 
     const where = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -92,9 +98,10 @@ app.get('/', async (c) => {
 
     // One lookup for the page, so the library can tell which rows still need a transcript.
     const transcribed = transcribedIds(list.map(row => row.id));
+    const memberships = collectionIds(list.map(row => row.id));
     return c.json({
       success: true,
-      data: list.map(row => ({ ...row, hasTranscript: transcribed.has(row.id) })),
+      data: list.map(row => ({ ...row, hasTranscript: transcribed.has(row.id), collectionIds: memberships.get(row.id) ?? [] })),
       pagination: { total: Number(count), limit, offset, hasMore: offset + list.length < Number(count) },
     });
   } catch (error) {
@@ -320,6 +327,10 @@ const documents = () => documentService ??= new DocumentGenerationService(new Or
 const findBatch = (id: string) => batches.get(id) ?? documentBatches.get(id);
 const uniqueIds = (value: unknown): string[] =>
   [...new Set((Array.isArray(value) ? value : []).filter((item): item is string => typeof item === 'string'))].slice(0, 500);
+/** Collection ids for one page of recordings, in one statement (KB-01). */
+function collectionIds(ids: string[]): Map<string, string[]> {
+  return new RecordingCollections(sqlite).membership(ids);
+}
 
 app.post('/batch/estimate', async c => {
   const body: { recordingIds?: unknown; kind?: unknown } = await c.req.json<{ recordingIds?: unknown; kind?: unknown }>().catch(() => ({}));
@@ -1016,12 +1027,23 @@ app.get('/stats/summary', async (c) => {
 // Analyze Recording
 // ============================================
 
+// Analysis runs through the job queue (KB-06) so it is listed, cancellable, and
+// retained in /api/v1/jobs. The request waits up to two minutes for the result
+// and otherwise answers 202 with the job id to poll.
 app.post('/:id/analyze', async (c) => {
   const id = c.req.param('id');
   try {
     const { recordingAnalyzer } = await import('../analysis/analyzer');
-    const analysis = await recordingAnalyzer.analyze(id);
-    return c.json({ success: true, data: analysis });
+    const cached = sqlite.query("SELECT t.summary FROM transcripts t JOIN recordings r ON r.id=t.recording_id WHERE t.recording_id=? AND r.retention_state='active' AND t.summary IS NOT NULL AND t.analyzed_at IS NOT NULL").get(id);
+    if (cached) return c.json({ success: true, data: await recordingAnalyzer.analyze(id) });
+    if (!sqlite.query("SELECT 1 FROM transcripts t JOIN recordings r ON r.id=t.recording_id WHERE t.recording_id=? AND r.retention_state='active'").get(id))
+      return c.json({ success: false, error: 'Active transcript not found.' }, 404);
+    const job = await jobQueue.add('analyze-recording', { recordingId: id, provider: readAiConfig(sqlite).analysisProvider }, 5);
+    const deadline = Date.now() + 120000;
+    while ((job.status === 'pending' || job.status === 'running') && Date.now() < deadline && !c.req.raw.signal.aborted) await Bun.sleep(200);
+    if (job.status === 'complete') return c.json({ success: true, data: await recordingAnalyzer.analyze(id), jobId: job.id });
+    if (job.status === 'pending' || job.status === 'running') return c.json({ success: true, data: null, jobId: job.id, state: job.status }, 202);
+    return c.json({ success: false, error: job.error || 'Analysis failed.', jobId: job.id }, 500);
   } catch (error) {
     return c.json({ success: false, error: String(error) }, 500);
   }
@@ -1034,37 +1056,16 @@ app.post('/:id/analyze', async (c) => {
 app.post('/:id/reprocess', async (c) => {
   const id = c.req.param('id');
   try {
-    const [recording] = await db.select().from(recordings).where(eq(recordings.id, id)).limit(1);
-    if (!recording || recording.retentionState !== 'active') return c.json({ success: false, error: 'Active recording not found' }, 404);
-    const { aiConfigSchema, readAiConfig } = await import('../ai/config');
     const body = await c.req.text();
-    let config, costConfirmed = false;
-    try {
-      const { confirmCost, ...overrides } = body.trim() ? JSON.parse(body) : {};
-      costConfirmed = confirmCost === true;
-      if (Object.keys(overrides).some(key => !key.startsWith('transcription'))) throw new Error('Unsupported override');
-      config = aiConfigSchema.parse({ ...readAiConfig(sqlite), ...overrides });
-      const { assertPrivacy } = await import('../ai/config');
-      const { validateEffective } = await import('../ai/transcription-profiles');
-      const resolved = validateEffective(sqlite, config);
-      assertPrivacy(readAiConfig(sqlite), resolved.config.transcriptionEngine);
-    } catch (error) {
-      const known = error instanceof Error && /profile|does not (support|accept)|Unsupported|Local-only/.test(error.message);
-      return c.json({ success: false, error: known ? (error as Error).message : 'Invalid or privacy-blocked transcription options.' }, 400);
-    }
-    // The queue would hand back the in-flight job and drop these options; say so instead of
-    // flipping a running job's status back to pending.
-    if (jobQueue.activeJob('process-recording', id)) return c.json({ success: false, error: 'This recording is already being processed. Cancel that job before reprocessing.' }, 409);
-    // AI-10: an estimate over the per-job threshold or the remaining budget needs explicit confirmation.
-    if (!costConfirmed) {
-      const cost = estimateRecordings(sqlite, [id], config);
-      if (cost.confirmationRequired) return c.json({ success: false, code: 'cost_confirmation_required', error: `Confirm the estimated cost first. ${cost.reasons.join(' ')}`, data: cost }, 409);
-    }
-    await db.update(recordings).set({ status: 'pending', errorMessage: null, processedAt: null }).where(eq(recordings.id, id));
-    await jobQueue.add('process-recording', { recordingId: id, filePath: recording.filePath, config, ...(costConfirmed ? { costConfirmed: true } : {}) });
-
-    return c.json({ success: true, message: 'Queued for reprocessing' });
+    let overrides: Record<string, unknown>, confirmCost = false;
+    try { ({ confirmCost, ...overrides } = body.trim() ? JSON.parse(body) : {}); }
+    catch { return c.json({ success: false, error: 'Invalid or privacy-blocked transcription options.' }, 400); }
+    // KB-06: a retried request with the same Idempotency-Key returns the same job.
+    const { job, replayed } = await submitTranscription(sqlite, jobQueue, { recordingId: id, overrides, idempotencyKey: c.req.header('Idempotency-Key'), confirmCost: confirmCost === true });
+    return c.json({ success: true, message: replayed ? 'Already queued for this request' : 'Queued for reprocessing', data: { jobId: job.id, state: job.status, replayed } });
   } catch (error) {
+    if (error instanceof JobSubmitError) return c.json({ success: false, code: error.code, error: error.status === 404 ? 'Active recording not found' : error.message, ...(error.data ? { data: error.data } : {}) }, error.status);
+    if (error instanceof z.ZodError) return c.json({ success: false, code: 'invalid_input', error: error.issues[0]?.message ?? 'Invalid request.' }, 400);
     return c.json({ success: false, error: String(error) }, 500);
   }
 });

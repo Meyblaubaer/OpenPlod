@@ -36,6 +36,10 @@ import { createAiSettingsApi } from './api/ai-settings';
 import { createJobsApi } from './api/jobs';
 import { createOnboardingApi } from './api/onboarding';
 import { createTranscriptionProfilesApi } from './api/transcription-profiles';
+import { createKnowledgeApi } from './api/knowledge';
+import { RecordingCollections } from './knowledge/collections';
+import { KnowledgeIndex } from './knowledge/retrieval';
+import { KnowledgeSuggestions } from './knowledge/suggestions';
 import { aiConfigSchema, readAiConfig, readSettings, assertPrivacy } from './ai/config';
 import { effectiveTranscription } from './ai/transcription-profiles';
 import { startAutomation } from './automation';
@@ -142,6 +146,12 @@ jobQueue.register('forward-recording', async (data: { recordingId: string }) => 
   await forwardRecordingWithRetry(data.recordingId);
 });
 
+// Manual analysis runs through the queue so it appears in /api/v1/jobs (KB-06).
+jobQueue.register('analyze-recording', async (data: { recordingId: string }) => {
+  const { recordingAnalyzer } = await import('./analysis/analyzer');
+  await recordingAnalyzer.analyze(data.recordingId, true);
+});
+
 // ============================================
 // Create Hono app
 // ============================================
@@ -160,7 +170,7 @@ app.use('*', cors({
       return '';
     }
   },
-  allowHeaders: ['Content-Type', 'Content-Range', 'Range', 'X-Chunk-SHA256', 'X-OpenPlod-Token'],
+  allowHeaders: ['Content-Type', 'Content-Range', 'Range', 'X-Chunk-SHA256', 'X-OpenPlod-Token', 'Idempotency-Key'],
   exposeHeaders: ['Accept-Ranges', 'Content-Length', 'Content-Range', 'Upload-Offset'],
 }));
 app.use('*', redactingLogger());
@@ -186,8 +196,11 @@ app.route('/api/v1/transcription-profiles', createTranscriptionProfilesApi(sqlit
 const automation = startAutomation({ database: sqlite, queue: jobQueue, organizer });
 app.route('/api/v1/webhooks', automation.webhooksApi);
 app.route('/api/v1/automations', automation.automationsApi);
+const knowledgeIndex = new KnowledgeIndex(sqlite);
+app.route('/api/v1', createKnowledgeApi({ collections: new RecordingCollections(sqlite), index: knowledgeIndex, suggestions: new KnowledgeSuggestions(sqlite, knowledgeIndex) }));
 app.route('/api/v1', createOrganizerApi(organizer));
-app.route('/api/ai', createRecordingAiApi(new RecordingAi(organizer)));
+app.route('/api/ai', createRecordingAiApi(new RecordingAi(organizer, undefined, undefined,
+  (query, { limit, signal }) => knowledgeIndex.search({ q: query.slice(0, 500), mode: 'hybrid', source: 'transcripts', limit }, { signal }))));
 app.route('/api/ai-settings', createAiSettingsApi(sqlite));
 app.route('/api/vault', createVaultApi(sqlite));
 app.route('/api/onboarding', createOnboardingApi(sqlite, () => new TranscriptionRouter({}, readSettings(sqlite)).status()));

@@ -11,6 +11,7 @@ import { AiSettingsPanel } from '@/components/AiSettingsPanel'
 import { TranscriptionProfilesPanel } from '@/components/TranscriptionProfilesPanel'
 import { UpdatePanel } from '@/components/UpdatePanel'
 import { BackupRestorePanel } from '@/components/BackupRestorePanel'
+import { SearchIndexPanel } from '@/components/SearchIndexPanel'
 import { ONBOARDING_EVENT, onboardingApi } from '@/lib/ai-settings'
 
 function Toggle({ checked, onChange, label, description }: { checked: boolean; onChange: (v: boolean) => void; label: string; description: string }) {
@@ -134,6 +135,7 @@ export function SettingsPage() {
       <AiSettingsPanel />
       <TranscriptionProfilesPanel />
       <BackupRestorePanel />
+      <SearchIndexPanel />
 
       {/* Sync */}
       <Card>
