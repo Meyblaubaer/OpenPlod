@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
@@ -18,6 +18,7 @@ const { initializeDatabase } = await import('../db/setup');
 const { recordings, transcripts, transcriptVersions } = await import('../db/schema');
 const {
   importRecordingFile,
+  purgeRecording,
   purgeExpiredTrash,
   restoreRecording,
   softDeleteRecording,
@@ -210,6 +211,45 @@ describe('recording library', () => {
     expect(confirmed.status).toBe(200);
     expect(await Bun.file(imported.recording.filePath).exists()).toBe(false);
   });
+
+  test('lists recordings by collection, and a purge removes collection membership (KB-01)', async () => {
+    const { RecordingCollections } = await import('../knowledge/collections');
+    const collections = new RecordingCollections(sqlite);
+    const ids: string[] = [];
+    for (const name of ['collection-a.m4a', 'collection-b.m4a']) {
+      const sourcePath = join(testRoot, name);
+      writeFileSync(sourcePath, `${name}-audio`);
+      ids.push((await importRecordingFile({ sourcePath, provenance: { sourceProvider: 'upload', sourceTransport: 'upload' } })).recording.id);
+    }
+    const collection = collections.create({ name: `Library ${crypto.randomUUID()}` });
+    collections.add(collection.id, { recordingIds: [ids[0]], revision: 1 });
+    const listed = await (await recordingsApi.request(`/?collection=${collection.id}`)).json() as { data: { id: string; collectionIds: string[] }[]; pagination: { total: number } };
+    expect(listed.data.map(row => row.id)).toEqual([ids[0]]);
+    expect(listed.data[0].collectionIds).toEqual([collection.id]);
+    expect(listed.pagination.total).toBe(1);
+    expect((await recordingsApi.request('/?collection=not-a-uuid')).status).toBe(400);
+    await softDeleteRecording(ids[0]);
+    expect(((await (await recordingsApi.request(`/?collection=${collection.id}`)).json()) as { data: unknown[] }).data).toEqual([]);
+    expect(collections.get(collection.id).recordingCount).toBe(0);
+    await recordingsApi.request(`/${ids[0]}?permanent=true&confirm=true`, { method: 'DELETE' });
+    expect(collections.membership([ids[0]]).size).toBe(0);
+  });
+
+  test('reprocess honours Idempotency-Key and reports the job (KB-06)', async () => {
+    const sourcePath = join(testRoot, 'idempotent-reprocess.m4a');
+    writeFileSync(sourcePath, 'idempotent-reprocess-audio');
+    const { recording } = await importRecordingFile({ sourcePath, provenance: { sourceProvider: 'upload', sourceTransport: 'upload' } });
+    const send = (key: string, body = '') => recordingsApi.request(`/${recording.id}/reprocess`, { method: 'POST', headers: { 'Idempotency-Key': key }, body });
+    const first = await (await send('reprocess-key-1')).json() as { data: { jobId: string; replayed: boolean } };
+    expect(first.data.replayed).toBe(false);
+    const again = await (await send('reprocess-key-1')).json() as { data: { jobId: string; state: string; replayed: boolean } };
+    expect(again.data).toEqual({ jobId: first.data.jobId, state: 'pending', replayed: true });
+    const conflict = await send('reprocess-key-1', JSON.stringify({ transcriptionLanguage: 'fr' }));
+    expect(conflict.status).toBe(409);
+    expect((await send('reprocess-key-2')).status).toBe(409);
+    expect((await recordingsApi.request(`/${crypto.randomUUID()}/reprocess`, { method: 'POST' })).status).toBe(404);
+    expect((await recordingsApi.request(`/${recording.id}/reprocess`, { method: 'POST', body: '{"chatProvider":"openai"}' })).status).toBe(400);
+  });
 });
 
 describe('mobile pairing', () => {
@@ -314,6 +354,43 @@ function uploadPlaud(input: { content: string; fingerprint: string; sourceId: st
     method: 'POST', headers: { 'X-OpenPlod-Token': 'test-pairing-token' }, body,
   });
 }
+
+describe('atomic import and complete purge (REL-03, REL-04)', () => {
+test('sidecars are committed with the recording and the journal is cleared', async () => {
+  const source = join(testRoot, 'atomic-source.m4a'), device = join(testRoot, 'atomic-device.plaud');
+  writeFileSync(source, `atomic-${Date.now()}`); writeFileSync(device, 'device bytes');
+  const sidecars = [{ name: 'device-original.plaud', sourcePath: device }, { name: 'provenance.json', data: '{"ok":true}' }];
+  const result = await importRecordingFile({ sourcePath: source, provenance: { sourceProvider: 'plaud', sourceTransport: 'ble', sourceRecordingId: `SN9:${Date.now()}` }, sidecars });
+  expect(result.added).toBe(true);
+  const originals = join(testRoot, 'vault', 'originals', result.recording.id);
+  expect(readFileSync(join(originals, 'device-original.plaud'), 'utf8')).toBe('device bytes');
+  expect(readFileSync(join(originals, 'provenance.json'), 'utf8')).toBe('{"ok":true}');
+  expect(sqlite.query('SELECT count(*) AS n FROM import_journal').get()).toEqual({ n: 0 });
+  expect(readdirSync(join(testRoot, 'vault', '.staging'))).toEqual([]);
+  // A duplicate import never replaces existing evidence.
+  writeFileSync(device, 'different');
+  const again = await importRecordingFile({ sourcePath: source, provenance: { sourceProvider: 'plaud', sourceTransport: 'ble' }, sidecars });
+  expect(again.added).toBe(false);
+  expect(readFileSync(join(originals, 'device-original.plaud'), 'utf8')).toBe('device bytes');
+
+  expect(await softDeleteRecording(result.recording.id)).toBe(true);
+  expect(await purgeRecording(result.recording.id)).toBe(true);
+  expect(existsSync(originals)).toBe(false);
+  expect(existsSync(result.recording.filePath)).toBe(false);
+  expect(sqlite.query('SELECT reason FROM recording_purges WHERE recording_id=?').get(result.recording.id)).toEqual({ reason: 'manual' });
+});
+
+test('a failed import leaves no partial vault files and keeps the source', async () => {
+  const source = join(testRoot, 'atomic-bad.m4a');
+  writeFileSync(source, `bad-${Date.now()}`);
+  await expect(importRecordingFile({ sourcePath: source, provenance: { sourceProvider: 'upload', sourceTransport: 'upload' },
+    sidecars: [{ name: '../escape', data: 'x' }] })).rejects.toThrow('Invalid sidecar name');
+  expect(existsSync(source)).toBe(true);
+  const files = readdirSync(join(testRoot, 'vault')).filter(name => name.endsWith('.m4a'));
+  expect(sqlite.query('SELECT count(*) AS n FROM import_journal').get()).toEqual({ n: 0 });
+  expect(files.every(name => sqlite.query('SELECT 1 FROM recordings WHERE file_path=?').get(join(testRoot, 'vault', name)))).toBe(true);
+});
+});
 
 function restoreEnv(name: string, value: string | undefined) {
   if (value === undefined) delete process.env[name];

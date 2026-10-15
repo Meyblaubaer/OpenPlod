@@ -1,9 +1,16 @@
 import { sqlite } from './client';
 import { initializeOrganizer } from '../organizer/store';
+import { initializeMobileSync } from '../sync/mobile-schema';
+import { assertVaultSchemaCompatible, recordVaultSchema } from './vault-meta';
+import { ensureImportJournal } from '../library/import-journal';
+import { ensureTombstoneTable } from '../library/purge';
+import { initializeKnowledge } from '../knowledge/schema';
 
 const SCHEMA_VERSION = 4;
 
 export function initializeDatabase() {
+  // REL-07: refuse a vault written by a newer schema before any migration touches it.
+  assertVaultSchemaCompatible(sqlite, SCHEMA_VERSION);
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS recordings (
       id TEXT PRIMARY KEY,
@@ -163,5 +170,12 @@ export function initializeDatabase() {
   // Library and transcript lists filter by retention and sort by recording date.
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_recordings_retention_recorded ON recordings(retention_state, recorded_at DESC)');
   sqlite.transaction(() => initializeOrganizer(sqlite))();
+  // Paired clients, resumable uploads, and the sync change feed (additive tables and triggers).
+  sqlite.transaction(() => initializeMobileSync(sqlite))();
+  // REL-03/REL-04: additive tables for the import journal and purge tombstones.
+  ensureImportJournal(sqlite);
+  ensureTombstoneTable(sqlite);
+  recordVaultSchema(sqlite);
+  sqlite.transaction(() => initializeKnowledge(sqlite))();
   sqlite.exec('PRAGMA optimize');
 }

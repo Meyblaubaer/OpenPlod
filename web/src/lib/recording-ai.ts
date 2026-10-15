@@ -1,7 +1,7 @@
 import { apiUrl, authenticatedHeaders } from './runtime'
 import type { AiAnswer } from '../../../src/organizer/recording-ai-types'
 export type { AiAnswer } from '../../../src/organizer/recording-ai-types'
-export type { AiConversationSummary as AiConversation } from '../../../src/organizer/recording-ai-types'
+export type { AiConversationSummary as AiConversation, AiConversationContext } from '../../../src/organizer/recording-ai-types'
 export async function aiRequest<T>(path: string, signal?: AbortSignal, init: { method?: string; body?: unknown } = {}): Promise<T> {
   const response = await fetch(apiUrl(`/ai${path}`), { method: init.method || 'GET', headers: authenticatedHeaders(init.body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000) })
   const body = await response.json().catch(() => null); if (!response.ok || !body?.success) throw new Error(body?.error || 'AI workspace unavailable.'); return body.data

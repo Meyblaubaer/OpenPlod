@@ -36,8 +36,9 @@ fn write_export(path: &Path, source: &mut impl std::io::Read) -> Result<(), Stri
 #[tauri::command]
 pub async fn export_document(app: tauri::AppHandle, filename: String, content: String) -> Result<bool, String> {
     let extension = Path::new(safe_filename(&filename)?).extension().and_then(|v| v.to_str());
-    if !matches!(extension, Some("md" | "txt" | "json")) || content.len() > 16 * 1024 * 1024 {
-        return Err("Document export must be Markdown, text, or JSON under 16 MB.".into());
+    // PDF exports from the server are ASCII-only, so they travel as text too.
+    if !matches!(extension, Some("md" | "txt" | "json" | "csv" | "html" | "pdf" | "srt" | "vtt")) || content.len() > 16 * 1024 * 1024 {
+        return Err("Document export must be Markdown, text, JSON, CSV, HTML, or PDF under 16 MB.".into());
     }
     let vault = app.path().app_data_dir().map_err(|_| "Vault location is unavailable.")?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -67,9 +68,40 @@ pub async fn export_audio(app: tauri::AppHandle, info: tauri::State<'_, crate::R
     }).await.map_err(|_| "Audio export could not start.")?
 }
 
+/// Let the person choose the Markdown export folder (roadmap KB-02). Returns the
+/// canonical path, or None when the dialog is cancelled. The app then saves it
+/// through the token-protected settings endpoint with an explicit confirmation;
+/// this command itself writes nothing.
+#[tauri::command]
+pub async fn pick_export_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let vault = app.path().app_data_dir().map_err(|_| "Vault location is unavailable.")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(folder) = rfd::FileDialog::new().set_title("Choose the OpenPlod export folder").pick_folder() else { return Ok(None) };
+        let folder = folder.canonicalize().map_err(|_| "That folder is unavailable.")?;
+        let vault = vault.canonicalize().unwrap_or(vault);
+        if !export_folder_allowed(&folder, &vault) {
+            return Err("Choose a folder outside OpenPlod's private vault.".into());
+        }
+        folder.to_str().map(|path| Some(path.to_string())).ok_or_else(|| "The folder path is not valid UTF-8.".to_string())
+    }).await.map_err(|_| "The folder picker could not start.")?
+}
+
+fn export_folder_allowed(folder: &Path, vault: &Path) -> bool {
+    folder.parent().is_some() && !folder.starts_with(vault) && !vault.starts_with(folder)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn export_folder_must_be_outside_the_vault() {
+        let vault = Path::new("/home/me/.local/share/com.openplod.vault");
+        assert!(export_folder_allowed(Path::new("/home/me/Obsidian"), vault));
+        assert!(!export_folder_allowed(Path::new("/home/me/.local/share/com.openplod.vault/exports"), vault));
+        assert!(!export_folder_allowed(Path::new("/home/me"), vault));
+        assert!(!export_folder_allowed(Path::new("/"), vault));
+    }
 
     #[test]
     fn filenames_cannot_escape_the_save_dialog() {

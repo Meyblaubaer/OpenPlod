@@ -5,6 +5,7 @@ import {
   Bluetooth,
   ChevronRight,
   FileText,
+  Folder,
   FolderHeart,
   HardDrive,
   Home,
@@ -20,6 +21,7 @@ import {
   UserRound,
   MessageSquare,
   Workflow,
+  Wand2,
 } from "@/components/icons";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { WorkspaceSearch } from "./WorkspaceSearch";
@@ -36,19 +38,23 @@ import { api } from "@/lib/api";
 import { getRuntime, apiUrl, authenticatedHeaders } from "@/lib/runtime";
 import { useTheme } from "@/hooks/useTheme";
 import { buildInfo, buildLabel } from "@/lib/build-info";
+import { knowledgeApi, type RecordingCollection } from "@/lib/knowledge";
+import { COLLECTIONS_EVENT } from "./RecordingCollections";
+import { t } from "@/i18n";
 
-const nav = [
-  { to: "/", icon: FolderHeart, label: "Recordings" },
-  { to: "/transcripts", icon: FileText, label: "Transcripts" },
-  { to: "/settings", icon: Settings, label: "Settings" },
+// Functions, not constants, so the labels follow the current language.
+const desktopNav = () => [
+  { to: "/", icon: Home, label: t("Home") },
+  { to: "/recordings", icon: FolderHeart, label: t("Recordings") },
+  { to: "/transcripts", icon: FileText, label: t("Transcripts") },
+  { to: "/notes", icon: NotebookPen, label: t("Documents") },
+  { to: "/ai", icon: MessageSquare, label: t("AI Chat") },
+  { to: "/automations", icon: Wand2, label: t("Automations") },
 ];
 
-const desktopNav = [
-  { to: "/", icon: Home, label: "Home" },
-  { to: "/recordings", icon: FolderHeart, label: "Recordings" },
-  nav[1],
-  { to: "/notes", icon: NotebookPen, label: "Documents" },
-  { to: "/ai", icon: MessageSquare, label: "AI Chat" },
+const mobileNav = () => [
+  { to: "/", icon: FolderHeart, label: t("Recordings") },
+  { to: "/notes", icon: NotebookPen, label: t("Documents") },
 ];
 
 export function Layout() {
@@ -61,10 +67,17 @@ export function Layout() {
   const clearMessageTimer = useRef<number | null>(null);
   const pageScrollRef = useRef<HTMLElement>(null);
   const captureMode = location.pathname === "/record";
-  const libraryView =
-    location.pathname === "/recordings"
-      ? new URLSearchParams(location.search).get("view")
-      : null;
+  const libraryParams = location.pathname === "/recordings" ? new URLSearchParams(location.search) : null;
+  const activeCollection = libraryParams?.get("collection") ?? null;
+  const libraryView = libraryParams ? libraryParams.get("view") ?? (activeCollection ? "collection" : null) : null;
+  const [collections, setCollections] = useState<RecordingCollection[]>([]);
+  useEffect(() => {
+    let disposed = false;
+    const load = () => knowledgeApi.collections().then(rows => { if (!disposed) setCollections(rows); }).catch(() => {});
+    void load();
+    window.addEventListener(COLLECTIONS_EVENT, load);
+    return () => { disposed = true; window.removeEventListener(COLLECTIONS_EVENT, load); };
+  }, []);
   useEffect(() => {
     let disposed = false;
     const load = () =>
@@ -108,7 +121,7 @@ export function Layout() {
         const result = await response.json(),
           newest = result.data?.events?.[0]?.id ?? 0;
         if (!stopped && lastId !== null && newest > lastId) {
-          setSyncMessage("Plaud recording safely stored in your vault");
+          setSyncMessage(t("Plaud recording safely stored in your vault"));
           window.dispatchEvent(new CustomEvent("plaud:sync-complete"));
           if (clearMessageTimer.current)
             clearTimeout(clearMessageTimer.current);
@@ -140,8 +153,8 @@ export function Layout() {
           <div className="sidebar-brand">
             <Brand />
           </div>
-          <nav className="sidebar-nav" aria-label="Main navigation">
-            {desktopNav.map(({ to, icon: Icon, label }) => (
+          <nav className="sidebar-nav" aria-label={t("Main navigation")}>
+            {desktopNav().map(({ to, icon: Icon, label }) => (
               <NavLink
                 key={to}
                 to={to}
@@ -164,7 +177,7 @@ export function Layout() {
               }
             >
               <Upload />
-              <span>Import</span>
+              <span>{t("Import")}</span>
             </NavLink>
             <NavLink
               to="/devices"
@@ -173,7 +186,7 @@ export function Layout() {
               }
             >
               <Bluetooth />
-              <span>Plaud Device</span>
+              <span>{t("Plaud Device")}</span>
             </NavLink>
             <Link
               to="/android"
@@ -200,7 +213,7 @@ export function Layout() {
               className={`nav-item ${libraryView === "starred" ? "active" : ""}`}
             >
               <Star />
-              <span>Starred</span>
+              <span>{t("Starred")}</span>
             </Link>
             <Link
               to="/recordings?view=trash"
@@ -208,20 +221,38 @@ export function Layout() {
               className={`nav-item ${libraryView === "trash" ? "active" : ""}`}
             >
               <Trash2 />
-              <span>Trash</span>
+              <span>{t("Trash")}</span>
             </Link>
+            {collections.length > 0 && (
+              <nav className="sidebar-collections" aria-label={t("Recording collections")}>
+                <small>{t("Collections")}</small>
+                {collections.slice(0, 30).map(collection => (
+                  <Link
+                    key={collection.id}
+                    to={`/recordings?collection=${collection.id}`}
+                    aria-current={activeCollection === collection.id ? "page" : undefined}
+                    className={`nav-item ${activeCollection === collection.id ? "active" : ""}`}
+                    title={collection.name}
+                  >
+                    <Folder />
+                    <span>{collection.name}</span>
+                    <small className="nav-count">{collection.recordingCount}</small>
+                  </Link>
+                ))}
+              </nav>
+            )}
             <div className="vault-state">
               <HardDrive />
               {runtime.mode === "desktop"
-                ? "Local recording vault"
-                : "OpenPlod workspace"}
+                ? t("Local recording vault")
+                : t("OpenPlod workspace")}
             </div>
             <NavLink to="/settings" className="workspace-profile">
               <span className="profile-avatar">
                 <UserRound />
               </span>
               <span>
-                Local workspace<small>Settings</small>
+                {t("Local workspace")}<small>{t("Settings")}</small>
               </span>
               <ChevronRight />
             </NavLink>
@@ -239,7 +270,7 @@ export function Layout() {
                   onClick={() => navigate("/record")}
                 >
                   <Mic />
-                  New recording
+                  {t("New recording")}
                 </Button>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -247,13 +278,13 @@ export function Layout() {
                       variant="ghost"
                       size="icon"
                       onClick={toggle}
-                      aria-label={dark ? "Use light mode" : "Use dark mode"}
+                      aria-label={dark ? t("Use light mode") : t("Use dark mode")}
                     >
                       {dark ? <Sun /> : <Moon />}
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    {dark ? "Light mode" : "Dark mode"}
+                    {dark ? t("Light mode") : t("Dark mode")}
                   </TooltipContent>
                 </Tooltip>
                 <DropdownMenu.Root>
@@ -261,8 +292,8 @@ export function Layout() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      aria-label="Notifications"
-                      title="Notifications"
+                      aria-label={t("Notifications")}
+                      title={t("Notifications")}
                     >
                       <Bell />
                     </Button>
@@ -272,12 +303,12 @@ export function Layout() {
                       className="action-menu notification-menu"
                       align="end"
                     >
-                      <DropdownMenu.Label>Notifications</DropdownMenu.Label>
+                      <DropdownMenu.Label>{t("Notifications")}</DropdownMenu.Label>
                       <p>
-                        {syncMessage || "No new notifications this session."}
+                        {syncMessage || t("No new notifications this session.")}
                       </p>
                       <DropdownMenu.Item onSelect={() => navigate("/devices")}>
-                        Device activity
+                        {t("Device activity")}
                       </DropdownMenu.Item>
                     </DropdownMenu.Content>
                   </DropdownMenu.Portal>
@@ -292,8 +323,8 @@ export function Layout() {
                 <Button asChild variant="ghost" size="icon" className="h-9 w-9">
                   <NavLink
                     to="/settings"
-                    aria-label="Settings"
-                    title="Settings"
+                    aria-label={t("Settings")}
+                    title={t("Settings")}
                   >
                     <Settings className="h-4 w-4" />
                   </NavLink>
@@ -303,8 +334,8 @@ export function Layout() {
                   size="icon"
                   className="h-9 w-9"
                   onClick={handleSync}
-                  aria-label="Open Plaud"
-                  title="Open Plaud"
+                  aria-label={t("Open Plaud")}
+                  title={t("Open Plaud")}
                 >
                   <Bluetooth className="h-4 w-4" />
                 </Button>
@@ -313,8 +344,8 @@ export function Layout() {
                   size="icon"
                   className="h-9 w-9"
                   onClick={toggle}
-                  aria-label={dark ? "Use light mode" : "Use dark mode"}
-                  title={dark ? "Use light mode" : "Use dark mode"}
+                  aria-label={dark ? t("Use light mode") : t("Use dark mode")}
+                  title={dark ? t("Use light mode") : t("Use dark mode")}
                 >
                   {dark ? (
                     <Sun className="h-4 w-4" />
@@ -347,7 +378,7 @@ export function Layout() {
               <div className="workspace-footer-links">
                 <span title={`OpenPlod ${buildInfo.version} / ${buildInfo.builtAt}`}>
                   <i />
-                  Build {buildLabel}
+                  {t("Build {label}", { label: buildLabel })}
                 </span>
                 <Smartphone />
                 <NavLink to="/developer">API</NavLink>
@@ -364,11 +395,8 @@ export function Layout() {
           )}
 
           {!captureMode && (
-            <nav className="mobile-nav" aria-label="Main navigation">
-              {[
-                nav[0],
-                { to: "/notes", icon: NotebookPen, label: "Documents" },
-              ].map(({ to, icon: Icon, label }) => (
+            <nav className="mobile-nav" aria-label={t("Main navigation")}>
+              {mobileNav().map(({ to, icon: Icon, label }) => (
                 <NavLink
                   key={to}
                   to={to}
@@ -385,8 +413,8 @@ export function Layout() {
                 className="capture-action"
                 type="button"
                 onClick={() => navigate("/record")}
-                aria-label="Record audio"
-                title="Record audio"
+                aria-label={t("Record audio")}
+                title={t("Record audio")}
               >
                 <Mic />
               </button>
@@ -397,7 +425,7 @@ export function Layout() {
                 }
               >
                 <MessageSquare aria-hidden="true" />
-                <span>AI</span>
+                <span>{t("AI")}</span>
               </NavLink>
               <NavLink
                 to="/devices"

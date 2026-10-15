@@ -46,9 +46,11 @@ import {
   safeDocumentName,
 } from "@/lib/document-export";
 import { formatDuration } from "@/lib/utils";
+import { formatDate, t } from "@/i18n";
 
 const contentTabs = ["Transcript", "AI Summary", "Notes", "Chapters", "Export"];
 const tabIcons = [FileText, AlignLeft, NotebookPen, ListTree, Download];
+const tabLabel = (value: string) => ({ Transcript: t("Transcript"), "AI Summary": t("AI Summary"), Notes: t("Notes"), Chapters: t("Chapters"), Export: t("Export") })[value] ?? value;
 
 export function RecordingPreview({
   id,
@@ -160,7 +162,7 @@ export function RecordingPreview({
         if (!disposed) {
           setReady(false);
           setPlaying(false);
-          setAudioError(e.name === 'TimeoutError' ? 'Audio download timed out. Retry playback.' : e instanceof TypeError ? 'Audio could not be downloaded. Check your vault connection and retry.' : e.message);
+          setAudioError(e.name === 'TimeoutError' ? t('Audio download timed out. Retry playback.') : e instanceof TypeError ? t('Audio could not be downloaded. Check your vault connection and retry.') : e.message);
           player?.destroy();
           player = undefined;
           wave.current = null;
@@ -197,7 +199,7 @@ export function RecordingPreview({
       setRecording((row) =>
         row ? { ...row, notes, revision: next.revision } : row,
       );
-      setNotice("Notes saved");
+      setNotice(t("Notes saved"));
       onUpdated();
     } catch (e) {
       setError((e as Error).message);
@@ -271,21 +273,21 @@ export function RecordingPreview({
           label: text.slice(0, 160),
         }),
       });
-      if (!response.ok) throw new Error("Could not save highlight.");
-      setNotice("Highlight saved");
+      if (!response.ok) throw new Error(t("Could not save highlight."));
+      setNotice(t("Highlight saved"));
     } catch (e) {
       setError((e as Error).message);
     }
   };
   return (
-    <section className="recording-preview" aria-label="Selected recording">
+    <section className="recording-preview" aria-label={t("Selected recording")}>
       <div className="preview-heading">
         <div>
-          <h2>{recording?.title || "Loading recording..."}</h2>
+          <h2>{recording?.title || t("Loading recording...")}</h2>
           <p>
             <Clock3 />
             {recording
-              ? new Date(recording.recordedAt).toLocaleString(undefined, {
+              ? formatDate(recording.recordedAt, {
                   dateStyle: "medium",
                   timeStyle: "short",
                 })
@@ -298,8 +300,8 @@ export function RecordingPreview({
           size="icon"
           variant="ghost"
           className={recording?.tags.includes("Starred") ? "is-starred" : ""}
-          title="Star recording"
-          aria-label="Star recording"
+          title={t("Star recording")}
+          aria-label={t("Star recording")}
           aria-pressed={!!recording?.tags.includes("Starred")}
           disabled={!recording || busy}
           onClick={() => void star()}
@@ -311,8 +313,8 @@ export function RecordingPreview({
             <Button
               size="icon"
               variant="ghost"
-              title="Recording actions"
-              aria-label="Recording actions"
+              title={t("Recording actions")}
+              aria-label={t("Recording actions")}
             >
               <MoreHorizontal />
             </Button>
@@ -322,7 +324,7 @@ export function RecordingPreview({
               <DropdownMenu.Item asChild>
                 <Link to={`/recording/${id}`}>
                   <ArrowUpRight />
-                  Open full recording
+                  {t("Open full recording")}
                 </Link>
               </DropdownMenu.Item>
               <DropdownMenu.Item
@@ -330,10 +332,10 @@ export function RecordingPreview({
                   setTab("Notes");
                 }}
               >
-                <NotebookPen />Edit notes
+                <NotebookPen />{t("Edit notes")}
               </DropdownMenu.Item>
               <DropdownMenu.Item onSelect={() => void download("md")}>
-                <Download />Export Markdown
+                <Download />{t("Export Markdown")}
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
@@ -348,9 +350,9 @@ export function RecordingPreview({
             if (audioError) { retryAudio(); return; }
             void wave.current
               ?.playPause()
-              .catch(() => setError("Playback could not start."));
+              .catch(() => setError(t("Playback could not start.")));
           }}
-          aria-label={audioError ? 'Retry playback' : playing ? "Pause recording" : "Play recording"}
+          aria-label={audioError ? t('Retry playback') : playing ? t("Pause recording") : t("Play recording")}
         >
           {audioError ? <RefreshCw /> : !ready ? (
             <Loader2 className="animate-spin" />
@@ -369,7 +371,7 @@ export function RecordingPreview({
           <input
             className="sr-only"
             type="range"
-            aria-label="Seek recording"
+            aria-label={t("Seek recording")}
             min={0}
             max={duration || 1}
             step={0.1}
@@ -378,18 +380,18 @@ export function RecordingPreview({
           />
         </div>
       </div>
-      {audioError && <div className="preview-audio-error" role="alert"><AlertCircle /><span>{audioError}</span><Button size="sm" variant="ghost" onClick={retryAudio}><RefreshCw />Retry</Button></div>}
+      {audioError && <div className="preview-audio-error" role="alert"><AlertCircle /><span>{audioError}</span><Button size="sm" variant="ghost" onClick={retryAudio}><RefreshCw />{t("Retry")}</Button></div>}
       <div className="preview-playback-tools">
         <PlaybackSpeedMenu value={speed} onChange={setSpeed} />
         <IconButton
-          label="Back 15 seconds"
+          label={t("Back 15 seconds")}
           disabled={!ready}
           onClick={() => seek(time - 15)}
         >
           <Undo2 />
         </IconButton>
         <IconButton
-          label="Forward 15 seconds"
+          label={t("Forward 15 seconds")}
           disabled={!ready}
           onClick={() => seek(time + 15)}
         >
@@ -397,14 +399,14 @@ export function RecordingPreview({
         </IconButton>
         <span />
         <IconButton
-          label="Download original audio"
+          label={t("Download original audio")}
           disabled={!canDownloadAudio}
           onClick={() => void download("audio")}
         >
           <Download />
         </IconButton>
         <IconButton
-          label="Export recording"
+          label={t("Export recording")}
           onClick={() => setTab("Export")}
         >
           <Share2 />
@@ -413,7 +415,7 @@ export function RecordingPreview({
       <div
         className="preview-tabs"
         role="tablist"
-        aria-label="Recording content"
+        aria-label={t("Recording content")}
       >
         {contentTabs.map((value, index) => {
           const Icon = tabIcons[index];
@@ -422,8 +424,8 @@ export function RecordingPreview({
             key={value}
             id={`preview-tab-${index}`}
             role="tab"
-            aria-label={value}
-            title={value}
+            aria-label={tabLabel(value)}
+            title={tabLabel(value)}
             aria-selected={value === tab}
             aria-controls="preview-content"
             tabIndex={value === tab ? 0 : -1}
@@ -445,7 +447,7 @@ export function RecordingPreview({
               document.getElementById(`preview-tab-${next}`)?.focus();
             }}
           >
-            <Icon aria-hidden="true" /><span>{value}</span>
+            <Icon aria-hidden="true" /><span>{tabLabel(value)}</span>
           </button>
         )})}
       </div>
@@ -487,31 +489,31 @@ export function RecordingPreview({
                     <p>{segment.text}</p>
                     <div className="segment-quick-actions">
                       <button
-                        aria-label={`Copy segment ${index + 1}`}
-                        title="Copy segment"
+                        aria-label={t("Copy segment {number}", { number: index + 1 })}
+                        title={t("Copy segment")}
                         onClick={() => {
                           void navigator.clipboard
                             .writeText(segment.text)
-                            .then(() => setNotice("Copied"))
-                            .catch(() => setError("Clipboard unavailable."));
+                            .then(() => setNotice(t("Copied")))
+                            .catch(() => setError(t("Clipboard unavailable.")));
                         }}
                       >
                         <Copy />
                       </button>
                       <button
-                        aria-label={`Ask AI about segment ${index + 1}`}
-                        title="Ask AI"
+                        aria-label={t("Ask AI about segment {number}", { number: index + 1 })}
+                        title={t("Ask AI")}
                         onClick={() =>
                           ask(
-                            `Explain this passage using the recording as context: ${segment.text}`,
+                            t("Explain this passage using the recording as context: {text}", { text: segment.text }),
                           )
                         }
                       >
                         <MessageSquare />
                       </button>
                       <button
-                        aria-label={`Highlight segment ${index + 1}`}
-                        title="Highlight"
+                        aria-label={t("Highlight segment {number}", { number: index + 1 })}
+                        title={t("Highlight")}
                         onClick={() =>
                           void highlight(segment.startTime, segment.text)
                         }
@@ -532,9 +534,9 @@ export function RecordingPreview({
           ) : (
             <div className="preview-empty">
               <FileAudio />
-              <p>No transcript yet.</p>
+              <p>{t("No transcript yet.")}</p>
               <Button onClick={() => navigate(`/recording/${id}`)}>
-                <FileText />Open transcription
+                <FileText />{t("Open transcription")}
               </Button>
             </div>
           ))}
@@ -547,14 +549,14 @@ export function RecordingPreview({
             ) : (
               <div className="preview-empty">
                 <AlignLeft />
-                <p>No saved summary yet.</p>
+                <p>{t("No saved summary yet.")}</p>
                 <Button
                   disabled={!recording?.transcriptText}
                   onClick={() =>
-                    ask("Summarize this recording with source citations.")
+                    ask(t("Summarize this recording with source citations."))
                   }
                 >
-                  <AlignLeft />Summarize recording
+                  <AlignLeft />{t("Summarize recording")}
                 </Button>
               </div>
             )}
@@ -562,7 +564,7 @@ export function RecordingPreview({
         )}
         {tab === "Notes" && (
           <div className="preview-notes">
-            <label htmlFor="preview-notes">Recording notes</label>
+            <label htmlFor="preview-notes">{t("Recording notes")}</label>
             <textarea
               id="preview-notes"
               value={notes}
@@ -582,7 +584,7 @@ export function RecordingPreview({
               onClick={() => void saveNotes()}
             >
               <Save />
-              Save notes
+              {t("Save notes")}
             </Button>
           </div>
         )}
@@ -605,15 +607,15 @@ export function RecordingPreview({
                 {
                   {
                     md: "Markdown",
-                    txt: "Plain text",
+                    txt: t("Plain text"),
                     json: "JSON",
-                    audio: "Audio file",
+                    audio: t("Audio file"),
                   }[format]
                 }
               </Button>
             ))}
             <Link to={`/recording/${id}`}>
-              Transcript versions and recording details
+              {t("Transcript versions and recording details")}
               <ArrowUpRight />
             </Link>
           </div>
@@ -627,16 +629,16 @@ export function RecordingPreview({
           }}
         >
           <input
-            aria-label="Ask AI about this recording"
-            placeholder="Ask AI about this recording..."
+            aria-label={t("Ask AI about this recording")}
+            placeholder={t("Ask AI about this recording...")}
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             maxLength={4000}
           />
           <button
             type="submit"
-            title="Ask AI"
-            aria-label="Ask AI"
+            title={t("Ask AI")}
+            aria-label={t("Ask AI")}
             disabled={!question.trim() || !recording?.transcriptText}
           >
             <ArrowUp />
@@ -645,19 +647,19 @@ export function RecordingPreview({
         <div className="preview-ai-actions">
           <button
             disabled={!recording?.transcriptText}
-            onClick={() => ask("Summarize this meeting with source citations.")}
+            onClick={() => ask(t("Summarize this meeting with source citations."))}
           >
-            <AlignLeft />Summary
+            <AlignLeft />{t("Summary")}
           </button>
           <button
             disabled={!recording?.transcriptText}
             onClick={() =>
               ask(
-                "Extract explicitly mentioned action items with source citations.",
+                t("Extract explicitly mentioned action items with source citations."),
               )
             }
           >
-            <ListChecks />Action items
+            <ListChecks />{t("Action items")}
           </button>
           {recording && (
             <SaveTranscriptDialog

@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { toFtsQuery } from '../search/query';
+import { emitAutomationEvent } from '../automation/hooks';
 import { createFolderSchema, updateFolderSchema, createNoteSchema, updateNoteSchema, snapshotSchema, noteListSchema, identifier, revision, createViewSchema, updateViewSchema } from './schemas';
 import type {
   NoteFolder, NoteDocument, NoteSummary, NoteVersion, NotePage, NoteProperties, DocumentSource,
@@ -237,6 +238,8 @@ export class OrganizerStore {
       this.database.query(`INSERT INTO note_documents(id,title,content,folder_id,properties,created_at,updated_at,idempotency_key,request_hash) VALUES(?,?,?,?,?,?,?,?,?)`)
         .run(id, data.title, data.content, data.folderId, JSON.stringify(properties), now, now, data.idempotencyKey, requestHash);
       this.writeTags(id, uniqueTags(data.tags));
+      // KB-08: the webhook outbox row commits or rolls back with the document.
+      void emitAutomationEvent({ type: 'document.created', documentId: id });
       return this.saveVersion(this.get(id));
     })();
   }

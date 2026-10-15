@@ -88,6 +88,16 @@ export async function pairMobile(serviceOrigin: string, pairingToken: string): P
     throw new Error(payload?.error || 'OpenPlod desktop could not be reached.')
   }
 
+  // Best effort: tell the desktop what kind of device this credential belongs to. The desktop
+  // owner can rename it; older desktops without per-client records simply ignore this.
+  const describe = authenticatedHeadersFor(token)
+  describe.set('Content-Type', 'application/json')
+  const platform = /android/i.test(navigator.userAgent) ? 'android' : /iphone|ipad/i.test(navigator.userAgent) ? 'ios' : 'mobile'
+  await fetch(`${origin}/api/mobile/clients/me`, {
+    method: 'PATCH', headers: describe, signal: AbortSignal.timeout(5000),
+    body: JSON.stringify({ name: platform === 'android' ? 'Android phone' : platform === 'ios' ? 'iPhone' : 'Phone', platform }),
+  }).catch(() => undefined)
+
   localStorage.setItem(STORAGE_ORIGIN, origin)
   localStorage.setItem(STORAGE_TOKEN, token)
   runtime = { mode: 'mobile', serviceOrigin: origin, pairingToken: token, lanAddress: null, paired: true }

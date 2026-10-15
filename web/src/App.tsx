@@ -4,6 +4,7 @@ import { Layout } from '@/components/Layout'
 import { Loader2 } from "@/components/icons"
 import { RuntimeGate } from '@/components/RuntimeGate'
 import { SharedAudioRouter } from '@/components/SharedAudioRouter'
+import { t, useLocale } from '@/i18n'
 
 const DevicesPage = lazy(() => import('@/pages/DevicesPage').then(module => ({ default: module.DevicesPage })))
 
@@ -17,19 +18,22 @@ const SettingsPage = lazy(() => import('@/pages/SettingsPage').then(module => ({
 const RecordingPage = lazy(() => import('@/pages/RecordingPage').then(module => ({ default: module.RecordingPage })))
 const ImportPage = lazy(() => import('@/pages/ImportPage').then(module => ({ default: module.ImportPage })))
 const DeveloperPage = lazy(() => import('@/pages/DeveloperPage').then(module => ({ default: module.DeveloperPage })))
+const AutomationsPage = lazy(() => import('@/pages/AutomationsPage').then(module => ({ default: module.AutomationsPage })))
 
 function PageFallback() {
   return (
-    <div className="flex h-full items-center justify-center" role="status" aria-label="Loading page">
+    <div className="flex h-full items-center justify-center" role="status" aria-label={t('Loading page')}>
       <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
     </div>
   )
 }
 
 export default function App() {
+  // Remount on a language change so every t() call re-renders in the new language.
+  const locale = useLocale()
   return (
     <RuntimeGate>
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter key={locale} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <SharedAudioRouter />
         <Suspense fallback={<PageFallback />}>
           <Routes>
@@ -39,6 +43,7 @@ export default function App() {
               <Route path="/recordings" element={<Dashboard />} />
               <Route path="/import" element={<ImportPage />} />
               <Route path="/developer" element={<DeveloperPage />} />
+              <Route path="/automations" element={<AutomationsPage />} />
               <Route path="/recording/:id" element={<RecordingDetail />} />
               <Route path="/record" element={<RecordingPage />} />
               <Route path="/transcripts" element={<TranscriptsPage />} />

@@ -9,16 +9,17 @@ import { folderPaths, generateDocument, notesApi, type DocumentGeneration, type 
 import { exportDocument, safeDocumentName } from '@/lib/document-export'
 import './notes-dialog.css'
 import { aiSettingsApi } from '@/lib/ai-settings'
+import { formatDate, t } from '@/i18n'
 
 /** Labels for the TS-07 templates, in the backend's order. */
-const DOCUMENT_STYLE_LABELS: [DocumentStyle, string][] = [
-  ['notes', 'Structured notes'],
-  ['meeting', 'Meeting minutes'],
-  ['interview', 'Interview notes'],
-  ['lecture', 'Lecture notes'],
-  ['brief', 'Project brief'],
-  ['prd', 'Product requirements'],
-  ['email', 'Follow-up email'],
+const documentStyleLabels = (): [DocumentStyle, string][] => [
+  ['notes', t('Structured notes')],
+  ['meeting', t('Meeting minutes')],
+  ['interview', t('Interview notes')],
+  ['lecture', t('Lecture notes')],
+  ['brief', t('Project brief')],
+  ['prd', t('Product requirements')],
+  ['email', t('Follow-up email')],
 ]
 
 export function NoteDialog({ title, description, children, onClose, busy = false }: {title: string; description: string; children: ReactNode; onClose: () => void; busy?: boolean}) {
@@ -27,21 +28,21 @@ export function NoteDialog({ title, description, children, onClose, busy = false
     <Dialog.Overlay className="note-dialog-overlay" />
     <Dialog.Content className="note-dialog" onCloseAutoFocus={event => { event.preventDefault(); returnFocus.current?.focus() }} onEscapeKeyDown={event => { if (busy) event.preventDefault() }} onInteractOutside={event => event.preventDefault()}>
       <header><div><Dialog.Title>{title}</Dialog.Title><Dialog.Description>{description}</Dialog.Description></div>
-        <Button size="icon" variant="ghost" disabled={busy} onClick={onClose} aria-label="Close dialog" title="Close"><X /></Button></header>
+        <Button size="icon" variant="ghost" disabled={busy} onClick={onClose} aria-label={t('Close dialog')} title={t('Close')}><X /></Button></header>
       {children}
     </Dialog.Content>
   </Dialog.Portal></Dialog.Root>
 }
 
-export function FolderSelect({ folders, value, onChange, rootLabel = 'Inbox', disabled = false, exclude }: {folders: NoteFolder[]; value: string; onChange: (value: string) => void; rootLabel?: string; disabled?: boolean; exclude?: string}) {
-  return <select aria-label="Folder" value={value} onChange={event => onChange(event.target.value)} disabled={disabled}>
-    <option value="">{rootLabel}</option>{folderPaths(folders).filter(row => row.folder.id !== exclude).map(row => <option key={row.folder.id} value={row.folder.id}>{row.path}</option>)}
+export function FolderSelect({ folders, value, onChange, rootLabel, disabled = false, exclude }: {folders: NoteFolder[]; value: string; onChange: (value: string) => void; rootLabel?: string; disabled?: boolean; exclude?: string}) {
+  return <select aria-label={t('Folder')} value={value} onChange={event => onChange(event.target.value)} disabled={disabled}>
+    <option value="">{rootLabel ?? t('Inbox')}</option>{folderPaths(folders).filter(row => row.folder.id !== exclude).map(row => <option key={row.folder.id} value={row.folder.id}>{row.path}</option>)}
   </select>
 }
 
 export function SaveTranscriptDialog({ recordingId, versionId, title, disabled }: {recordingId: string; versionId: string | null; title: string; disabled?: boolean}) {
   const [open, setOpen] = useState(false)
-  return <><Button size="sm" variant="outline" title="Structure this transcript into an AI document" disabled={disabled} onClick={() => setOpen(true)}><FilePlus2 />Create document</Button>
+  return <><Button size="sm" variant="outline" title={t('Structure this transcript into an AI document')} disabled={disabled} onClick={() => setOpen(true)}><FilePlus2 />{t('Create document')}</Button>
     {open && <SaveTranscriptForm recordingId={recordingId} versionId={versionId} title={title} onClose={() => setOpen(false)} />}</>
 }
 
@@ -67,7 +68,7 @@ function SaveTranscriptForm({ recordingId, versionId, title, onClose }: {recordi
     aiSettingsApi.get().then(value => { if (!controller.signal.aborted) setProvider(value.documentProvider) }).catch(error => { if (!controller.signal.aborted) setError(error.message) })
     return () => controller.abort()
   }, [])
-  return <NoteDialog title={generation ? 'Review document' : 'Create AI document'} description={title} onClose={onClose} busy={busy}>
+  return <NoteDialog title={generation ? t('Review document') : t('Create AI document')} description={title} onClose={onClose} busy={busy}>
     <form onSubmit={async event => {
       event.preventDefault(); setBusy(true); setError('')
       try {
@@ -80,24 +81,24 @@ function SaveTranscriptForm({ recordingId, versionId, title, onClose }: {recordi
           setGeneration(await generateDocument({ recordingId, versionId, title: name, style, instructions, idempotencyKey: crypto.randomUUID(), expectedProvider: provider }, setStage, controller.signal))
           generationController.current = null
         }
-      } catch (error) { setError(error instanceof Error && error.name === 'AbortError' ? 'Generation cancelled. Nothing was saved to Notes.' : error instanceof Error ? error.message : 'Could not create document.') }
+      } catch (error) { setError(error instanceof Error && error.name === 'AbortError' ? t('Generation cancelled. Nothing was saved to Notes.') : error instanceof Error ? error.message : t('Could not create document.')) }
       finally { setBusy(false) }
-    }}><label>Title<input value={name} onChange={event => setName(event.target.value)} maxLength={180} required disabled={busy || !!generation} /></label>
+    }}><label>{t('Title')}<input value={name} onChange={event => setName(event.target.value)} maxLength={180} required disabled={busy || !!generation} /></label>
       {!generation && <>
-        <label>Document style<select value={style} onChange={event => setStyle(event.target.value as DocumentStyle)} disabled={busy}>{DOCUMENT_STYLE_LABELS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-        <label>Focus (optional)<textarea value={instructions} onChange={event => setInstructions(event.target.value)} maxLength={2000} rows={3} disabled={busy} /></label>
-        <p className="note-ai-disclosure">{provider === 'ollama' ? 'The transcript will be processed by local Ollama.' : provider ? `The transcript will be sent to ${provider}.` : 'Loading provider...'} Original audio and transcript stay unchanged.</p>
+        <label>{t('Document style')}<select value={style} onChange={event => setStyle(event.target.value as DocumentStyle)} disabled={busy}>{documentStyleLabels().map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <label>{t('Focus (optional)')}<textarea value={instructions} onChange={event => setInstructions(event.target.value)} maxLength={2000} rows={3} disabled={busy} /></label>
+        <p className="note-ai-disclosure">{provider === 'ollama' ? t('The transcript will be processed by local Ollama.') : provider ? t('The transcript will be sent to {provider}.', { provider }) : t('Loading provider...')} {t('Original audio and transcript stay unchanged.')}</p>
       </>}
-      {busy && !generation && <p className="note-ai-progress" role="status"><Loader2 className="animate-spin" />{stage === 'transcript' ? 'Reading saved transcript...' : stage === 'ready' ? 'Preparing preview...' : `${provider} is structuring your document...`}</p>}
+      {busy && !generation && <p className="note-ai-progress" role="status"><Loader2 className="animate-spin" />{stage === 'transcript' ? t('Reading saved transcript...') : stage === 'ready' ? t('Preparing preview...') : t('{provider} is structuring your document...', { provider })}</p>}
       {generation && <>
-        <details className="note-ai-trace"><summary>Generated by {generation.provider}</summary><p>{generation.model}</p><ol>{generation.steps.map(step => <li key={step.stage}>{step.stage === 'transcript' ? 'Source transcript retrieved' : step.stage === generation.provider ? 'Generation requested' : 'Structured document received'}</li>)}</ol><small>Generation {generation.id}</small></details>
+        <details className="note-ai-trace"><summary>{t('Generated by {provider}', { provider: generation.provider })}</summary><p>{generation.model}</p><ol>{generation.steps.map(step => <li key={step.stage}>{step.stage === 'transcript' ? t('Source transcript retrieved') : step.stage === generation.provider ? t('Generation requested') : t('Structured document received')}</li>)}</ol><small>{t('Generation {id}', { id: generation.id })}</small></details>
         <div className="note-ai-preview markdown-document"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={{ img: () => null, a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer noopener">{children}</a> }}>{generation.content}</ReactMarkdown></div>
       </>}
-      <label>Folder<FolderSelect folders={folders} value={folderId} onChange={setFolderId} disabled={loading || busy} /></label>
+      <label>{t('Folder')}<FolderSelect folders={folders} value={folderId} onChange={setFolderId} disabled={loading || busy} /></label>
       {error && <p role="alert" className="note-error">{error}</p>}
-      <footer>{busy && !generation ? <Button type="button" variant="ghost" onClick={() => generationController.current?.abort()}><X />Cancel generation</Button> : <Button type="button" variant="ghost" disabled={busy} onClick={onClose}><X />Cancel</Button>}
-        {generation && <Button type="button" variant="outline" disabled={busy} onClick={() => { setGeneration(null); setError('') }}><RotateCcw />Start again</Button>}
-        <Button disabled={loading || busy || !name.trim() || !provider}>{busy ? <Loader2 className="animate-spin" /> : generation ? <NotebookPen /> : <Wand2 />}{generation ? 'Save document' : 'Generate document'}</Button></footer>
+      <footer>{busy && !generation ? <Button type="button" variant="ghost" onClick={() => generationController.current?.abort()}><X />{t('Cancel generation')}</Button> : <Button type="button" variant="ghost" disabled={busy} onClick={onClose}><X />{t('Cancel')}</Button>}
+        {generation && <Button type="button" variant="outline" disabled={busy} onClick={() => { setGeneration(null); setError('') }}><RotateCcw />{t('Start again')}</Button>}
+        <Button disabled={loading || busy || !name.trim() || !provider}>{busy ? <Loader2 className="animate-spin" /> : generation ? <NotebookPen /> : <Wand2 />}{generation ? t('Save document') : t('Generate document')}</Button></footer>
     </form>
   </NoteDialog>
 }
@@ -119,28 +120,28 @@ export function SendNoteDialog({ document, onClose }: {document: NoteDocument; o
     return () => { cancelled = true }
   }, [document.id])
   const destination = destinations.find(row => row.id === destinationId)
-  return <NoteDialog title="Send document" description={`${document.title} / Saved revision ${document.revision}`} busy={busy} onClose={onClose}>
-    <div className="note-send-local"><Button variant="outline" size="sm" disabled={busy} onClick={() => void exportDocument({ filename: `${safeDocumentName(document.title)}.md`, content: document.content, mime: 'text/markdown' }).catch(error => setError(error instanceof Error ? error.message : 'Export failed.'))}><Download />Markdown file</Button>
+  return <NoteDialog title={t('Send document')} description={t('{title} / Saved revision {revision}', { title: document.title, revision: document.revision })} busy={busy} onClose={onClose}>
+    <div className="note-send-local"><Button variant="outline" size="sm" disabled={busy} onClick={() => void exportDocument({ filename: `${safeDocumentName(document.title)}.md`, content: document.content, mime: 'text/markdown' }).catch(error => setError(error instanceof Error ? error.message : t('Export failed.')))}><Download />{t('Markdown file')}</Button>
       <Button variant="outline" size="sm" disabled={busy} onClick={() => {
-        if (!navigator.clipboard) { setError('Clipboard unavailable. Export the Markdown file instead.'); return }
-        void navigator.clipboard.writeText(document.content).then(() => setError('')).catch(() => setError('Clipboard unavailable. Export the Markdown file instead.'))
-      }}><Copy />Copy Markdown</Button></div>
+        if (!navigator.clipboard) { setError(t('Clipboard unavailable. Export the Markdown file instead.')); return }
+        void navigator.clipboard.writeText(document.content).then(() => setError('')).catch(() => setError(t('Clipboard unavailable. Export the Markdown file instead.')))
+      }}><Copy />{t('Copy Markdown')}</Button></div>
     <form onSubmit={async event => {
       event.preventDefault(); setBusy(true); setError('')
       try { const delivery = await notesApi.send(document.id, destinationId, document.revision, key); setSent(delivery); setHistory(await notesApi.deliveries(document.id)) }
-      catch (error) { setError(error instanceof Error ? error.message : 'Delivery could not be confirmed. Retry only to check this delivery.') }
+      catch (error) { setError(error instanceof Error ? error.message : t('Delivery could not be confirmed. Retry only to check this delivery.')) }
       finally { setBusy(false) }
     }}>
-      <label>Destination<select value={destinationId} disabled={busy || !!sent} onChange={event => setDestinationId(event.target.value)}>
-        <option value="" disabled>{loaded ? 'No destination selected' : 'Loading destinations...'}</option>
+      <label>{t('Destination')}<select value={destinationId} disabled={busy || !!sent} onChange={event => setDestinationId(event.target.value)}>
+        <option value="" disabled>{loaded ? t('No destination selected') : t('Loading destinations...')}</option>
         {destinations.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
       </select></label>
-      {destination && <p className="note-send-warning">The saved Markdown and source references will be sent to <strong>{destination.host}</strong>.</p>}
-      {loaded && !error && !destinations.length && <p>No destinations configured.</p>}
+      {destination && <p className="note-send-warning">{(() => { const [before, after = ''] = t('The saved Markdown and source references will be sent to {host}.').split('{host}'); return <>{before}<strong>{destination.host}</strong>{after}</> })()}</p>}
+      {loaded && !error && !destinations.length && <p>{t('No destinations configured.')}</p>}
       {error && <p role="alert" className="note-error">{error}</p>}
-      {sent && <p role="status">{sent.state === 'sent' ? 'Destination accepted the document.' : 'Delivery unconfirmed. Check the destination before starting another delivery.'}</p>}
-      {history.length > 0 && <section className="note-delivery-history"><h3>Recent deliveries</h3>{history.slice(0, 5).map(row => <div key={row.id}><span>{destinations.find(item => item.id === row.destinationId)?.name || row.destinationId}</span><span>{row.state === 'sent' ? 'Accepted' : row.state === 'pending' ? 'Pending' : 'Unconfirmed'}</span><small>{new Date(row.createdAt).toLocaleString()}</small></div>)}</section>}
-      <footer><Button type="button" variant="ghost" disabled={busy} onClick={onClose}><X />Close</Button><Button disabled={busy || !destinationId || !!sent}>{busy ? <Loader2 className="animate-spin" /> : <Send />}Send document</Button></footer>
+      {sent && <p role="status">{sent.state === 'sent' ? t('Destination accepted the document.') : t('Delivery unconfirmed. Check the destination before starting another delivery.')}</p>}
+      {history.length > 0 && <section className="note-delivery-history"><h3>{t('Recent deliveries')}</h3>{history.slice(0, 5).map(row => <div key={row.id}><span>{destinations.find(item => item.id === row.destinationId)?.name || row.destinationId}</span><span>{row.state === 'sent' ? t('Accepted') : row.state === 'pending' ? t('Pending') : t('Unconfirmed')}</span><small>{formatDate(row.createdAt)}</small></div>)}</section>}
+      <footer><Button type="button" variant="ghost" disabled={busy} onClick={onClose}><X />{t('Close')}</Button><Button disabled={busy || !destinationId || !!sent}>{busy ? <Loader2 className="animate-spin" /> : <Send />}{t('Send document')}</Button></footer>
     </form>
   </NoteDialog>
 }

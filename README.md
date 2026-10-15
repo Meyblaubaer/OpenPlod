@@ -28,7 +28,7 @@
 OpenPlod brings recording, playback, transcription, and export into one desktop-first workspace. The desktop app owns the durable audio vault on macOS, Linux, and Windows; the Android companion pairs over your private network and can extract directly from an enrolled Note Pro. Keep recordings on your Plaud, keep a copy on your computer, and work with transcripts as documents.
 
 > [!IMPORTANT]
-> **1.0.0 ships with documented support boundaries.** Direct Bluetooth extraction has been verified on one authorized Plaud Note Pro; other devices and firmware are not established, and the recorder still refuses audio until this computer holds a Plaud-minted identity. Cloud AI paths are contract-tested but were not exercised against live providers for this release, and no signed binaries are attached. The vault, microphone, file imports, transcripts, profiles, and documents work without a Plaud identity. See the [1.0.0 scope decision](ROADMAP.md#100-scope-decision).
+> **1.0.0 implements the whole 1.0 roadmap, with documented support boundaries.** Direct Bluetooth extraction has been verified on one authorized Plaud Note Pro; other devices and firmware are not established, and the recorder still refuses audio until this computer holds a Plaud-minted identity. Provider, connector, and Android paths are covered by automated tests but were not exercised against live accounts or a physical phone for this release, and release signing needs your keys. The vault, microphone, imports, transcripts, profiles, documents, automation, and backups work without a Plaud identity. See the [1.0.0 status](ROADMAP.md#100-status).
 
 ![OpenPlod desktop recording library in dark mode; private titles are redacted](docs/images/recording-library.png)
 
@@ -58,11 +58,43 @@ job runs, and records it in the transcript's provenance. A profile never rewrite
 model and key with a connection check, a profile, and where to bring recordings in from. Skip it,
 or run it again from Settings or the command palette. See [Getting started](docs/getting-started.md).
 
-**Also new:** a ⌘K command palette with quick actions, reviewable AI title and tag suggestions for
-documents, and a read-only `list_transcription_profiles` MCP tool. 1.0.0 also rolls up the 0.7.0
-knowledge workspace: document tags, properties, saved views, transcript-version backlinks, a
-versioned job API, managed one-way Markdown export to an Obsidian folder, and chat conversation
-rename, archive, and export. Full details are in the [changelog](CHANGELOG.md#100---2026-10-15).
+**Also in 1.0.0: the rest of the roadmap.**
+
+- **AI providers:**
+  - Spending limits with estimates and confirmation.
+  - Long recordings split and merged automatically.
+  - Gemini and a restricted OpenAI-compatible endpoint.
+  - Fallback order per task, and provenance for every summary and document.
+- **Transcript Studio:**
+  - Saved chapters, decisions and action items.
+  - Server-side PDF export.
+  - Batch document generation.
+  - Side-by-side comparison of two transcription providers.
+- **Knowledge:**
+  - Recording collections.
+  - Export attachments and a folder picker.
+  - Pinned chat sources, project context and suggested follow-ups.
+  - Hybrid search with local embeddings, plus recording title, tag and topic suggestions.
+- **Automation:**
+  - Signed webhooks, with retries and full history.
+  - Opt-in rules ("Plaud meeting → transcribe → minutes → folder"), with preview and history.
+  - Reviewed task exports to Todoist, Linear, Notion or calendar files.
+- **Android and sync:**
+  - Separate credentials for each paired phone, with revocation.
+  - Resumable uploads and an offline outbox.
+  - A sync change feed with conflict detection.
+  - Release signing from your own keystore.
+- **Safety:**
+  - Crash-safe imports and complete purge.
+  - Encrypted full-vault backups with a restore wizard.
+  - Keys and secrets encrypted at rest, and an auto-updater.
+  - A 10,000-recording benchmark.
+- **French and English** throughout, and automated accessibility checks.
+- **Smaller additions:** a ⌘K command palette with quick actions, AI title and tag suggestions for
+  documents, and the 0.7.0 knowledge workspace (tags, saved views, backlinks, Obsidian export,
+  conversation management).
+
+Every item is listed in the [changelog](CHANGELOG.md#100---2026-10-15).
 
 ## Previously in 0.6.0
 
@@ -96,16 +128,10 @@ Earlier releases (0.5.1 cross-platform Bluetooth, 0.5.0 multi-provider AI, 0.4.x
 
 ## Beyond 1.0.0
 
-1.0.0 was released under an explicit [scope decision](ROADMAP.md#100-scope-decision): the release
-gates that need real hardware, live providers, or weeks of daily use were not run, and their items
-move to 1.x rather than being marked complete. Next up:
-
-- **1.1:** live-provider acceptance with real audio, backup and restore, and spending limits.
-- **1.2:** resumable Android uploads, offline synchronization, and pairing management.
-- **1.x:** hybrid retrieval with local embeddings, signed webhook events and opt-in rules, recording
-  collections, export attachments, and signed, notarized desktop builds.
-
-See the [roadmap](ROADMAP.md) for every item and its acceptance criteria.
+Every roadmap item is implemented. The [1.0.0 status](ROADMAP.md#100-status) lists the evidence
+that only a device owner can add: real-audio runs with live provider accounts, a physical Android
+phone, one real Plaud capture to confirm the transfer checksum, signing keys, and the benchmark on
+the reference Mac. After 1.0: live captions, two-way Obsidian sync, more Plaud models, and iOS.
 
 ## Download
 
@@ -283,7 +309,7 @@ The current development source uses native Android Bluetooth GATT and the verifi
 4. On the phone's **Plaud** tab, request device authorization. Compare the short code and approve it in the Mac's **Devices** screen. The existing owner identity is encrypted to the phone's key and stored using Android Keystore. No rebinding or reset occurs.
 5. Disconnect other Plaud clients, wake the Note Pro beside the **phone**, and select **Get from Plaud**. After enrollment, Bluetooth extraction and local playback do not need the Mac online. The desktop-backed library, transcripts, and AI still need the paired Mac.
 
-Mobile-to-desktop uploads verify fingerprints and retain phone audio until durable acknowledgement. Interrupted network uploads retry the whole file; byte-offset mobile-to-vault resumption is not implemented. Direct Bluetooth downloads retain partial bytes and resume by offset. Android preserves encrypted device bytes and the decoded original separately, then creates a playback-only Ogg by selecting unchanged Opus pages from Plaud's mixed audio/metadata container.
+Mobile-to-desktop uploads verify fingerprints and retain phone audio until durable acknowledgement. Interrupted network uploads resume from the last confirmed byte, with a SHA-256 check per chunk and on the whole file before the desktop acknowledges it ([mobile sync](docs/mobile-sync.md)). Direct Bluetooth downloads retain partial bytes and resume by offset. Android preserves encrypted device bytes and the decoded original separately, then creates a playback-only Ogg by selecting unchanged Opus pages from Plaud's mixed audio/metadata container.
 
 Optional automatic import runs as a visible Android foreground service while enabled. Desktop automatic import waits for a stable session size before downloading. Both avoid already-imported source IDs and leave originals on the Plaud. Android battery restrictions and process termination can stop background monitoring; unattended restart/boot recovery remains a roadmap item.
 

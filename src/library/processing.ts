@@ -3,6 +3,7 @@ import { db } from '../db/client';
 import { recordings, userSettings } from '../db/schema';
 import { jobQueue } from '../jobs/queue';
 import { aiConfigFromSettings } from '../ai/config';
+import { emitAutomationEvent } from '../automation/hooks';
 
 export type ProcessingRoute = 'openwhistle' | 'local' | 'disabled';
 
@@ -11,6 +12,8 @@ export async function queueRecordingProcessing(params: {
   filePath: string;
   settings?: Record<string, string>;
 }): Promise<ProcessingRoute> {
+  // KB-08/KB-09: webhooks and opt-in rules first, so a rule's transcription choice is queued before the default.
+  await emitAutomationEvent({ type: 'recording.imported', recordingId: params.recordingId });
   const settings = params.settings ?? Object.fromEntries(
     (await db.select().from(userSettings)).map(setting => [setting.key, setting.value]),
   );

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertCircle, Bluetooth, CheckCircle2, Loader2, Monitor, RefreshCw } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { api, type EnvironmentCheck, type PlaudEnvironment } from '@/lib/api'
+import { t, tn } from '@/i18n'
 import './plaud-system-check.css'
 
 /**
@@ -28,7 +29,7 @@ const PLATFORM_LABELS: Record<string, string> = {
 
 const describeHost = (environment: PlaudEnvironment) => {
   const os = PLATFORM_LABELS[environment.platform] ?? environment.platform
-  const backend = environment.backend ? BACKEND_LABELS[environment.backend] ?? environment.backend : 'no Bluetooth backend'
+  const backend = environment.backend ? BACKEND_LABELS[environment.backend] ?? environment.backend : t('no Bluetooth backend')
   return `${os} · ${environment.arch} · ${backend}`
 }
 
@@ -41,7 +42,7 @@ function CheckRow({ check }: { check: EnvironmentCheck }) {
       <div className="plaud-check-body">
         <p className="plaud-check-label">
           {check.label}
-          <span className="plaud-check-state">{check.ok ? 'Ready' : 'Action needed'}</span>
+          <span className="plaud-check-state">{check.ok ? t('Ready') : t('Action needed')}</span>
         </p>
         <p className="plaud-check-detail">{check.detail}</p>
         {check.remediation && <p className="plaud-check-fix">{check.remediation}</p>}
@@ -68,7 +69,7 @@ export function PlaudSystemCheck({ onReadyChange }: { onReadyChange?: (ready: bo
       setEnvironment(value); setError('')
       notify.current?.(value.ready)
     } catch {
-      if (mounted.current) setError('The system check could not run. Is the vault service running?')
+      if (mounted.current) setError(t('The system check could not run. Is the vault service running?'))
     } finally {
       if (mounted.current) setLoading(false)
     }
@@ -87,12 +88,12 @@ export function PlaudSystemCheck({ onReadyChange }: { onReadyChange?: (ready: bo
       <div className="plaud-section-heading">
         <span className="plaud-section-icon"><Monitor /></span>
         <div>
-          <h2 id="plaud-system-check-heading">This computer</h2>
-          <p>{environment ? describeHost(environment) : 'Detecting the host Bluetooth stack…'}</p>
+          <h2 id="plaud-system-check-heading">{t('This computer')}</h2>
+          <p>{environment ? describeHost(environment) : t('Detecting the host Bluetooth stack…')}</p>
         </div>
         <Button variant="outline" size="sm" onClick={recheck} disabled={loading}>
           {loading ? <Loader2 className="plaud-spin" /> : <RefreshCw />}
-          Re-check
+          {t('Re-check')}
         </Button>
       </div>
 
@@ -103,17 +104,17 @@ export function PlaudSystemCheck({ onReadyChange }: { onReadyChange?: (ready: bo
           <p className="plaud-system-summary" data-ready={environment.ready}>
             <Bluetooth aria-hidden="true" />
             {environment.ready
-              ? 'This computer is ready for direct Bluetooth transfer.'
-              : `${environment.blockers.length} thing${environment.blockers.length === 1 ? '' : 's'} left before direct Bluetooth transfer works.`}
+              ? t('This computer is ready for direct Bluetooth transfer.')
+              : tn(environment.blockers.length, '{count} thing left before direct Bluetooth transfer works.', '{count} things left before direct Bluetooth transfer works.')}
           </p>
           <ul className="plaud-check-list">
             {environment.checks.map(check => <CheckRow key={check.id} check={check} />)}
           </ul>
           {environment.bridgePath && (
             <p className="plaud-check-footnote">
-              Bridge: <code>{environment.bridgePath}</code>
-              {environment.bridgeBackend === 'swift' && ' (macOS Swift fallback)'}
-              {environment.adapter && <> · Adapter: <code>{environment.adapter}</code></>}
+              {t('Bridge:')} <code>{environment.bridgePath}</code>
+              {environment.bridgeBackend === 'swift' && ` ${t('(macOS Swift fallback)')}`}
+              {environment.adapter && <> · {t('Adapter:')} <code>{environment.adapter}</code></>}
             </p>
           )}
         </>

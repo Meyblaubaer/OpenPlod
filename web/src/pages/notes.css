@@ -225,3 +225,6 @@
 .notes-suggestions > .notes-suggestions-close { border: 0; padding: 2px; background: transparent; color: var(--muted-foreground); }
 .notes-suggestions-empty { color: var(--muted-foreground); }
 .notes-suggestions-error { margin-top: 4px; font-size: 11px; color: var(--destructive); overflow-wrap: anywhere; }
+/* Keyboard focus stays visible where the field itself has no border (REL-09). */
+.notes-search:focus-within { outline: 2px solid var(--ring); outline-offset: 1px; }
+.notes-search input:focus-visible, .notes-tags input:focus-visible { box-shadow: 0 1px 0 0 var(--ring); }

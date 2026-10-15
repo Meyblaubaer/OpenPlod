@@ -25,8 +25,15 @@
       "csp": "default-src 'self' customprotocol: asset:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:3487 http://*:* https://*:*; img-src 'self' asset: http://asset.localhost blob: data:; media-src 'self' asset: http://asset.localhost blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": ["https://github.com/RemiPelloux/OpenPlod/releases/latest/download/latest.json"]
+    }
+  },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": false,
     "targets": "all",
     "externalBin": ["binaries/openplod-server", "binaries/plaud-bridge"],
     "resources": { "resources/scan-plaud.swift": "resources/scan-plaud.swift", "../scripts/plaud-bridge.swift": "resources/plaud-bridge.swift" },

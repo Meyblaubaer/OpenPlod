@@ -152,9 +152,14 @@ pub fn run() {
       Ok(())
     });
 
+  // REL-07: update checks verify the release signature against the build-time public key.
+  #[cfg(desktop)]
+  let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+
   #[cfg(desktop)]
   let builder = builder.invoke_handler(tauri::generate_handler![
-    runtime_info, plaud::plaud_command, desktop_exports::export_document, desktop_exports::export_audio
+    runtime_info, plaud::plaud_command, desktop_exports::export_document, desktop_exports::export_audio,
+    desktop_exports::pick_export_folder
   ]);
   #[cfg(mobile)]
   let builder = builder.invoke_handler(tauri::generate_handler![runtime_info, plaud::plaud_command]);

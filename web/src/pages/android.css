@@ -12,3 +12,20 @@
 .android-page :is(a,summary):focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; }
 @media (max-width: 1000px) { .android-pairing { padding-right: 20px; }.android-details { padding-left: 20px; } }
 @media (max-width: 767px) { .android-page { padding: 0 12px 24px; }.android-heading { min-height: 60px; }.android-heading h1 { font-size: 22px; }.android-workspace { grid-template-columns: minmax(0,1fr); }.android-pairing { border-right: 0; border-bottom: 1px solid var(--border); padding: 24px 8px; }.android-details { padding: 0 8px; } }
+.android-manual-hint { font-size: 11px; color: var(--muted-foreground); }
+.android-clients { border-top: 1px solid var(--border); margin-top: 24px; padding-top: 24px; }
+.android-clients ul { list-style: none; margin: 0; padding: 0; }
+.android-clients li { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.android-clients li.revoked { opacity: 0.6; }
+.android-client-main { min-width: 0; flex: 1; }
+.android-client-main strong { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.android-client-main form { display: flex; gap: 6px; align-items: center; }
+.android-client-main input { min-width: 0; flex: 1; border: 1px solid var(--input); border-radius: 6px; background: var(--background); color: var(--foreground); padding: 5px 8px; font-size: 13px; }
+.android-client-main dl { margin-top: 6px; }
+.android-client-main dl > div { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; line-height: 1.7; }
+.android-client-main dt { color: var(--muted-foreground); }
+.android-client-main dd { text-align: right; overflow-wrap: anywhere; }
+.android-client-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+.android-clients-empty { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted-foreground); }
+.android-clients-empty svg { width: 14px; height: 14px; }
+@media (max-width: 767px) { .android-clients li { flex-direction: column; } .android-client-actions { align-self: flex-end; } }

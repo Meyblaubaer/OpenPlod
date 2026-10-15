@@ -1,0 +1,22 @@
+.outbox { width: min(100%, 520px); border: 1px solid var(--border); border-radius: 8px; background: var(--background); text-align: left; }
+.outbox > header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.outbox > header > div { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.outbox > header svg { width: 18px; height: 18px; color: var(--muted-foreground); flex: none; }
+.outbox h2 { font-size: 14px; font-weight: 650; }
+.outbox header p { font-size: 11px; color: var(--muted-foreground); margin-top: 3px; }
+.outbox-keep { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted-foreground); }
+.outbox-keep select { border: 1px solid var(--input); border-radius: 6px; background: var(--background); color: var(--foreground); padding: 4px 6px; font-size: 12px; }
+.outbox ul { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
+.outbox-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.outbox-item:last-child { border-bottom: 0; }
+.outbox-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 12px; }
+.outbox-main strong { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.outbox-main span { color: var(--muted-foreground); }
+.outbox-item.failed .outbox-status { color: var(--destructive); }
+.outbox-item.stored .outbox-status { color: var(--primary); }
+.outbox-error { color: var(--destructive) !important; overflow-wrap: anywhere; }
+.outbox-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+.outbox-actions > svg { width: 18px; height: 18px; color: var(--primary); margin: 0 6px; }
+.outbox-confirm { display: flex; gap: 4px; }
+.outbox-message { padding: 10px 14px; font-size: 12px; color: var(--muted-foreground); border-top: 1px solid var(--border); }
+@media (max-width: 480px) { .outbox > header { padding: 10px 12px; } .outbox-item { padding: 10px 12px; } }

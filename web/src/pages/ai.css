@@ -34,3 +34,4 @@
 .ai-history-item > .ai-history-row { flex: 1; min-width: 0; border-bottom: 0; }
 .ai-history-rename { display: flex; align-items: center; gap: 2px; padding: 8px 0; border-bottom: 1px solid var(--border); }
 .ai-history-rename input { flex: 1; min-width: 0; border: 1px solid var(--input); border-radius: 5px; background: var(--background); padding: 7px 9px; font: inherit; font-size: 12px; }
+.ai-input textarea:focus-visible { box-shadow: 0 1px 0 0 var(--ring); }

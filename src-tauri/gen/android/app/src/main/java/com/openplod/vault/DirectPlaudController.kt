@@ -27,7 +27,7 @@ class DirectPlaudController private constructor(private val context: Context) {
     fun snapshot(): JSONObject = JSONObject().put("state", state).put("error", error ?: JSONObject.NULL)
         .put("serial", serial ?: JSONObject.NULL).put("battery", JSONObject.NULL).put("listLoaded", listLoaded)
         .put("files", JSONArray(files.map { JSONObject().put("sessionId", it.sessionId.toString()).put("size", it.size).put("scene", it.scene) }))
-        .put("devices", JSONArray()).put("localRecordings", store.list()).put("downloading", downloading).put("busy", busy.get())
+        .put("devices", JSONArray()).put("localRecordings", store.list()).put("outbox", store.outbox()).put("downloading", downloading).put("busy", busy.get())
         .put("progress", progress).put("playingId", JSONObject.NULL).put("configured", identity.configured())
         .put("autoImport", preferences.getBoolean("autoImport", false)).put("lastNotice", lastNotice ?: JSONObject.NULL)
         .put("lastCheck", lastCheck).put("transport", "direct-bluetooth")

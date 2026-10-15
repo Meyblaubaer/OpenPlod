@@ -2,12 +2,14 @@ import type { Database } from 'bun:sqlite';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { Job, JobQueue } from '../jobs/queue';
+import { JobSubmitError, planTranscription, submitTranscription, transcriptionOverrides } from '../jobs/submit';
 
 /**
  * Versioned processing-job contract (roadmap KB-06).
  *
- * A stable, read-mostly view over the durable queue in `src/jobs/queue.ts`. It
- * never submits work: jobs are still created by the import, process and
+ * A stable, read-mostly view over the durable queue in `src/jobs/queue.ts`.
+ * `POST /` submits a transcription with an explicit confirmation and optional
+ * `Idempotency-Key`; other jobs are created by the import, process, analyze and
  * forward flows, which keep their own per-recording idempotency. Fields may be
  * added; existing fields keep their meaning within `/api/v1`.
  */
@@ -23,6 +25,10 @@ export interface JobDescriptor {
   provider: string | null;
   priority: number;
   checkpoint: { phase: string; remoteId: string | null } | null;
+  /** Chunked work done so far (AI-08), e.g. 2 of 5 audio chunks; null when the job is not measured in steps. */
+  progress: { done: number; total: number } | null;
+  /** Automatic retries already made (at most two, only before anything was sent). */
+  attempts: number;
   /** What the job produced. Transcript version ids are only listed once the version exists. */
   resultRefs: { transcriptVersionIds: string[] };
 }
@@ -33,6 +39,17 @@ const jobListSchema = z.object({
   recordingId: z.string().uuid().optional(),
   offset: z.coerce.number().int().min(0).max(1000000).default(0),
   limit: z.coerce.number().int().min(1).max(100).default(30),
+}).strict();
+
+const jobCreateSchema = z.object({
+  type: z.literal('process-recording'),
+  recordingId: z.string().uuid(),
+  options: z.record(z.string(), z.unknown()).optional(),
+  confirm: z.boolean().optional(),
+  acceptCloudProvider: z.boolean().optional(),
+  confirmCost: z.boolean().optional(),
+  dryRun: z.boolean().default(false),
+  idempotencyKey: z.string().optional(),
 }).strict();
 
 const iso = (date: Date | undefined) => date ? date.toISOString() : null;
@@ -48,7 +65,7 @@ export function describeJobs(database: Database, jobs: Job[]): JobDescriptor[] {
     ? (database.query('SELECT id FROM transcript_versions WHERE id IN (SELECT value FROM json_each(?))').all(JSON.stringify(candidates)) as { id: string }[]).map(row => row.id)
     : []);
   return jobs.map(job => {
-    const data = (job.data ?? {}) as { recordingId?: unknown; config?: { transcriptionEngine?: unknown } };
+    const data = (job.data ?? {}) as { recordingId?: unknown; provider?: unknown; config?: { transcriptionEngine?: unknown } };
     return {
       id: job.id,
       type: job.type,
@@ -58,9 +75,11 @@ export function describeJobs(database: Database, jobs: Job[]): JobDescriptor[] {
       completedAt: iso(job.completedAt),
       error: job.error ?? null,
       recordingId: typeof data.recordingId === 'string' ? data.recordingId : null,
-      provider: typeof data.config?.transcriptionEngine === 'string' ? data.config.transcriptionEngine : null,
+      provider: typeof data.config?.transcriptionEngine === 'string' ? data.config.transcriptionEngine : typeof data.provider === 'string' ? data.provider : null,
       priority: job.priority,
       checkpoint: job.checkpoint ? { phase: job.checkpoint.phase, remoteId: job.checkpoint.remoteId ?? null } : null,
+      progress: job.checkpoint?.progress ? { done: job.checkpoint.progress.done, total: job.checkpoint.progress.total } : null,
+      attempts: job.attempts ?? 0,
       resultRefs: { transcriptVersionIds: versions.has(job.id) ? [job.id] : [] },
     };
   });
@@ -80,6 +99,27 @@ export function createJobsApi(queue: JobQueue, database: Database) {
     // Newest first; the queue holds jobs in submission order.
     const page = matching.slice().reverse().slice(query.offset, query.offset + query.limit);
     return c.json({ success: true, data: { jobs: describeJobs(database, page), total: matching.length, offset: query.offset, limit: query.limit, stats: queue.getStats() } });
+  });
+  /**
+   * Create a transcription job (KB-06, used by the MCP `start_transcription` tool).
+   * Requires `confirm: true`; a cloud provider additionally requires
+   * `acceptCloudProvider: true`, and `dryRun` only reports the plan. An
+   * `Idempotency-Key` header makes retries return the same job.
+   */
+  app.post('/', async c => {
+    const input = jobCreateSchema.parse(await c.req.json());
+    try {
+      const { plan } = planTranscription(database, input.recordingId, transcriptionOverrides(input.options));
+      if (input.dryRun) return c.json({ success: true, data: { plan, job: null } });
+      if (input.confirm !== true) return c.json({ success: false, code: 'confirmation_required', error: 'Confirm the transcription request.', data: { plan } }, 400);
+      if (plan.requiresCloudConsent && input.acceptCloudProvider !== true)
+        return c.json({ success: false, code: 'cloud_consent_required', error: `This sends the recording audio to ${plan.provider}, a cloud provider that may bill for it. Ask the person, then retry with acceptCloudProvider: true.`, data: { plan } }, 409);
+      const { job, replayed } = await submitTranscription(database, queue, { recordingId: input.recordingId, overrides: input.options, idempotencyKey: c.req.header('Idempotency-Key') ?? input.idempotencyKey, confirmCost: input.confirmCost });
+      return c.json({ success: true, data: { plan, replayed, job: describeJobs(database, [job])[0] } }, replayed ? 200 : 201);
+    } catch (error) {
+      if (error instanceof JobSubmitError) return c.json({ success: false, code: error.code, error: error.message, ...(error.data ? { data: error.data } : {}) }, error.status);
+      throw error;
+    }
   });
   app.get('/:id', c => {
     const job = queue.getJob(c.req.param('id'));

@@ -9,6 +9,20 @@
 .batch-failures code { font-family: ui-monospace, monospace; }
 .batch-error { display: flex; align-items: flex-start; gap: 7px; margin-bottom: 8px; font-size: 12px; color: var(--destructive); }
 .batch-error svg { width: 15px; height: 15px; flex-shrink: 0; margin-top: 1px; }
+.batch-modes { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.batch-modes button { padding: 4px 10px; font: inherit; color: var(--muted-foreground); background: transparent; border: 0; cursor: pointer; }
+.batch-modes button[data-active="true"] { color: var(--foreground); background: var(--muted); }
+.batch-modes button:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.batch-documents { display: grid; gap: 10px; padding: 12px; font-size: 12px; border: 1px solid var(--border); border-radius: 6px; }
+.batch-documents-fields { display: flex; flex-wrap: wrap; gap: 10px; }
+.batch-documents-fields label { display: flex; flex-direction: column; gap: 4px; flex: 1 1 180px; min-width: 0; }
+.batch-documents-fields label > span { color: var(--muted-foreground); }
+.batch-documents-fields select, .batch-documents-fields textarea { padding: 6px 8px; font: inherit; color: inherit; background: var(--background); border: 1px solid var(--border); border-radius: 6px; }
+.batch-documents-wide { flex-basis: 100% !important; }
+.batch-documents-list { display: grid; gap: 4px; max-height: 180px; margin: 0; padding: 8px 10px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
+.batch-documents-list legend { padding: 0 4px; color: var(--muted-foreground); }
+.batch-documents-list label { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.batch-bar--plain { padding: 0; border: 0; }
 .batch-spin { animation: batch-spin 1s linear infinite; }
 @keyframes batch-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .batch-spin { animation: none; } }

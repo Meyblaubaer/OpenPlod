@@ -9,7 +9,11 @@ import { getRuntime } from '@/lib/runtime'
 import { buildInfo, buildLabel } from '@/lib/build-info'
 import { AiSettingsPanel } from '@/components/AiSettingsPanel'
 import { TranscriptionProfilesPanel } from '@/components/TranscriptionProfilesPanel'
+import { UpdatePanel } from '@/components/UpdatePanel'
+import { BackupRestorePanel } from '@/components/BackupRestorePanel'
+import { SearchIndexPanel } from '@/components/SearchIndexPanel'
 import { ONBOARDING_EVENT, onboardingApi } from '@/lib/ai-settings'
+import { LOCALES, setLocale, t, useLocale, type Locale } from '@/i18n'
 
 function Toggle({ checked, onChange, label, description }: { checked: boolean; onChange: (v: boolean) => void; label: string; description: string }) {
   return (
@@ -47,6 +51,7 @@ export function SettingsPage() {
     }
   }, [hash])
   const runtime = getRuntime()
+  const locale = useLocale()
   const [settings, setSettings] = useState<Settings>({
     transcriptionEngine: 'whisper',
     mistralApiKey: '',
@@ -73,7 +78,7 @@ export function SettingsPage() {
 
   useEffect(() => {
     api.getSettings().then(value => { setSettings(value); setLoaded(true) }).catch(loadError => {
-      setError(loadError instanceof Error ? loadError.message : 'Could not load settings')
+      setError(loadError instanceof Error ? loadError.message : t('Could not load settings'))
     })
     return () => {
       if (savedTimer.current) window.clearTimeout(savedTimer.current)
@@ -90,7 +95,7 @@ export function SettingsPage() {
       if (savedTimer.current) window.clearTimeout(savedTimer.current)
       savedTimer.current = window.setTimeout(() => setSaved(false), 2000)
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Could not save settings')
+      setError(saveError instanceof Error ? saveError.message : t('Could not save settings'))
     } finally {
       setSaving(false)
     }
@@ -102,11 +107,11 @@ export function SettingsPage() {
     <div className="settings-page">
       <div className="flex items-center justify-between">
         <div>
-          <h1>Settings</h1>
+          <h1>{t('Settings')}</h1>
         </div>
         <Button onClick={save} disabled={saving || !loaded}>
           {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
-          {saved ? 'Saved!' : 'Save'}
+          {saved ? t('Saved!') : t('Save')}
         </Button>
       </div>
 
@@ -117,33 +122,44 @@ export function SettingsPage() {
         </div>
       )}
 
+      <div className="flex items-center justify-between gap-4 border-b pb-4">
+        <label htmlFor="settings-language" className="text-sm font-medium">{t('Language')}</label>
+        <select id="settings-language" className="rounded-md border bg-background px-2 py-1 text-sm" value={locale} onChange={event => setLocale(event.target.value as Locale)}>
+          {LOCALES.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+        </select>
+      </div>
+
       <details className="border-b pb-4">
-        <summary className="cursor-pointer text-sm text-muted-foreground">About OpenPlod</summary>
-        <dl className="grid gap-3 py-4 text-sm"><div><dt className="text-muted-foreground">Version</dt><dd>{buildInfo.version}</dd></div><div><dt className="text-muted-foreground">Installed build</dt><dd><time dateTime={buildInfo.builtAt}>{buildLabel}</time></dd></div><div><dt className="text-muted-foreground">Platform</dt><dd>{runtime.mode === 'desktop' ? 'Desktop' : runtime.mode === 'mobile' ? 'Mobile' : 'Browser'}</dd></div></dl>
-        <Button variant="outline" onClick={() => { void onboardingApi.reset().catch(() => {}).finally(() => window.dispatchEvent(new Event(ONBOARDING_EVENT))) }}><Rocket />Run the setup guide again</Button>
+        <summary className="cursor-pointer text-sm text-muted-foreground">{t('About OpenPlod')}</summary>
+        <dl className="grid gap-3 py-4 text-sm"><div><dt className="text-muted-foreground">{t('Version')}</dt><dd>{buildInfo.version}</dd></div><div><dt className="text-muted-foreground">{t('Installed build')}</dt><dd><time dateTime={buildInfo.builtAt}>{buildLabel}</time></dd></div><div><dt className="text-muted-foreground">{t('Platform')}</dt><dd>{runtime.mode === 'desktop' ? t('Desktop') : runtime.mode === 'mobile' ? t('Mobile') : t('Browser')}</dd></div></dl>
+        <Button variant="outline" onClick={() => { void onboardingApi.reset().catch(() => {}).finally(() => window.dispatchEvent(new Event(ONBOARDING_EVENT))) }}><Rocket />{t('Run the setup guide again')}</Button>
+        <UpdatePanel />
       </details>
 
       <details id="pairing" ref={pairingSection} className="border-b pb-4">
-        <summary className="cursor-pointer text-sm text-muted-foreground">Mobile pairing</summary>
-        <Button asChild variant="outline" className="mt-4"><Link to="/android"><Smartphone />Android connection</Link></Button>
+        <summary className="cursor-pointer text-sm text-muted-foreground">{t('Mobile pairing')}</summary>
+        <Button asChild variant="outline" className="mt-4"><Link to="/android"><Smartphone />{t('Android connection')}</Link></Button>
       </details>
 
       <AiSettingsPanel />
       <TranscriptionProfilesPanel />
+      <BackupRestorePanel />
+      <SearchIndexPanel />
 
       {/* Sync */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Sync</CardTitle>
+          <CardTitle className="text-base">{t('Sync')}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium">Plaud Sync Folder</label>
+            <label htmlFor="settings-sync-folder" className="text-sm font-medium">{t('Plaud Sync Folder')}</label>
             <Input
+              id="settings-sync-folder"
               value={settings.syncFolderPath}
               onChange={e => update({ syncFolderPath: e.target.value })}
             />
-            <p className="text-xs text-muted-foreground">Path to your PlaudSync folder on this machine</p>
+            <p className="text-xs text-muted-foreground">{t('Path to your PlaudSync folder on this machine')}</p>
           </div>
         </CardContent>
       </Card>
@@ -151,18 +167,18 @@ export function SettingsPage() {
       {/* Automation */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Automation</CardTitle>
+          <CardTitle className="text-base">{t('Automation')}</CardTitle>
         </CardHeader>
         <CardContent className="divide-y">
           <Toggle
             checked={settings.autoImport}
             onChange={v => update({ autoImport: v })}
-            label="Auto-import Plaud recordings"
-            description="Import new files when they appear in the Plaud sync folder"
+            label={t('Auto-import Plaud recordings')}
+            description={t('Import new files when they appear in the Plaud sync folder')}
           />
           <div className="py-3">
-            <p className="text-sm font-medium">Recording types</p>
-            <p className="mb-3 text-xs text-muted-foreground">Choose which detected Plaud exports are imported automatically</p>
+            <p className="text-sm font-medium">{t('Recording types')}</p>
+            <p className="mb-3 text-xs text-muted-foreground">{t('Choose which detected Plaud exports are imported automatically')}</p>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {['class', 'meeting', 'conversation', 'other'].map(type => (
                 <label key={type} className="flex items-center gap-2 text-sm capitalize">
@@ -175,7 +191,7 @@ export function SettingsPage() {
                         : [...settings.plaudRecordingTypes, type],
                     })}
                   />
-                  {type}
+                  {({ class: t('Class'), meeting: t('Meeting'), conversation: t('Conversation'), other: t('Other') } as Record<string, string>)[type]}
                 </label>
               ))}
             </div>
@@ -183,20 +199,20 @@ export function SettingsPage() {
           <Toggle
             checked={settings.deleteSourceAfterImport}
             onChange={v => update({ deleteSourceAfterImport: v })}
-            label="Delete exported file after import"
-            description="Keep the durable vault copy and remove the source export"
+            label={t('Delete exported file after import')}
+            description={t('Keep the durable vault copy and remove the source export')}
           />
           <Toggle
             checked={settings.autoTranscribe}
             onChange={v => update({ autoTranscribe: v })}
-            label="Auto-transcribe"
-            description="Automatically transcribe new recordings when synced"
+            label={t('Auto-transcribe')}
+            description={t('Automatically transcribe new recordings when synced')}
           />
           <Toggle
             checked={settings.autoSummarize}
             onChange={v => update({ autoSummarize: v })}
-            label="Auto-summarize"
-            description="Generate AI summary after transcription completes"
+            label={t('Auto-summarize')}
+            description={t('Generate AI summary after transcription completes')}
           />
         </CardContent>
       </Card>
@@ -209,20 +225,20 @@ export function SettingsPage() {
           <Toggle
             checked={settings.openWhistleForwarding}
             onChange={v => update({ openWhistleForwarding: v })}
-            label="Forward recordings"
-            description="Send imported audio to OpenWhistle for agents and connectors"
+            label={t('Forward recordings')}
+            description={t('Send imported audio to OpenWhistle for agents and connectors')}
           />
           <div className="space-y-2">
-            <label className="text-sm font-medium">API base URL</label>
-            <Input value={settings.openWhistleBaseUrl} onChange={e => update({ openWhistleBaseUrl: e.target.value })} placeholder="https://openwhistle.pro/api/v1" />
+            <label htmlFor="settings-ow-url" className="text-sm font-medium">{t('API base URL')}</label>
+            <Input id="settings-ow-url" value={settings.openWhistleBaseUrl} onChange={e => update({ openWhistleBaseUrl: e.target.value })} placeholder="https://openwhistle.pro/api/v1" />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium">Agent ID</label>
-            <Input value={settings.openWhistleAgentId} onChange={e => update({ openWhistleAgentId: e.target.value })} />
+            <label htmlFor="settings-ow-agent" className="text-sm font-medium">{t('Agent ID')}</label>
+            <Input id="settings-ow-agent" value={settings.openWhistleAgentId} onChange={e => update({ openWhistleAgentId: e.target.value })} />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium">API key</label>
-            <Input type="password" value={settings.openWhistleApiKey || ''} onChange={e => update({ openWhistleApiKey: e.target.value })} placeholder={settings.openWhistleApiKeyConfigured ? 'Saved key (enter a new key to replace)' : 'owk_...'} />
+            <label htmlFor="settings-ow-key" className="text-sm font-medium">{t('API key')}</label>
+            <Input id="settings-ow-key" type="password" value={settings.openWhistleApiKey || ''} onChange={e => update({ openWhistleApiKey: e.target.value })} placeholder={settings.openWhistleApiKeyConfigured ? t('Saved key (enter a new key to replace)') : 'owk_...'} />
           </div>
         </CardContent>
       </Card>

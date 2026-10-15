@@ -30,3 +30,5 @@ uuid = { version = "1", features = ["v4"] }
 rfd = "0.15"
 reqwest = { version = "0.13", default-features = false, features = ["blocking"] }
 tempfile = "3"
+# REL-07: signed in-app updates. The public key is injected at release build time (see scripts/release-config.ts).
+tauri-plugin-updater = "2"

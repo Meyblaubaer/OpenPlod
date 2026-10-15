@@ -2,10 +2,11 @@
 
 ## 1.0.0 - 2026-10-15
 
-OpenPlod 1.0 is the first stable release: a local-first recording vault with transcription you can
-steer, a guided first run, and the knowledge workspace built during 0.7.0. It ships with the
-documented support boundaries below, decided explicitly instead of waiting on every roadmap gate
-([scope decision](ROADMAP.md#100-scope-decision)).
+OpenPlod 1.0 implements the whole 1.0 roadmap: every milestone from 0.5 to 0.9, including the
+stretch items. It adds a guided first run, transcription profiles, a French interface, and the
+0.7.0 knowledge workspace. What still needs real devices, live provider accounts, or signing keys
+is listed under [Support boundaries](#support-boundaries) and in the
+[roadmap status](ROADMAP.md#100-status).
 
 ### Added
 
@@ -38,6 +39,118 @@ documented support boundaries below, decided explicitly instead of waiting on ev
   it, as an ordinary revision-checked edit. Long notes send their first 24,000 characters and say
   so. New endpoint: `POST /api/v1/documents/:id/suggestions`.
 - **MCP:** read-only `list_transcription_profiles`.
+
+### Added: AI providers (0.5.0 items)
+
+- **Spending limits (AI-10).** A monthly budget and a per-job threshold. Prices come from a dated
+  table, always labelled as estimates; a price that isn't known stays unknown rather than guessed.
+  Every transcription and batch shows the estimate. A job over the threshold or the remaining
+  budget needs explicit confirmation (`409 cost_confirmation_required`), and a ledger records each
+  job's estimate and the usage the provider reported.
+- **Long audio (AI-08).** Files over a provider's size limit, or longer than a duration you choose,
+  are split with ffmpeg into overlapping 10-minute chunks. Their timestamps are offset to the full
+  recording and the overlap is merged without dropping or repeating speech. Each chunk is
+  checkpointed, so a restart resumes after the last finished chunk. Jobs now report progress, and
+  safe failures (nothing outstanding at the provider) retry at most twice.
+- **More providers (AI-14).** Gemini, and a restricted OpenAI-compatible endpoint: HTTPS only
+  (except loopback), no redirects, and treated as cloud unless it is local.
+- **Per-task fallback (AI-07).** Summaries, documents and chat each have an explicit ordered
+  fallback list. Local-only mode is enforced at every step, and the provider that actually answered
+  is recorded.
+- **Other provider work:**
+  - AssemblyAI: remote cancel (AI-03).
+  - Capability catalogs: languages and timestamp granularity per model (AI-04/05).
+  - Provenance for summaries and documents (AI-09).
+  - Shared provider settings for chat and documents (AI-11).
+  - Ollama context-window checks, so a long transcript is refused instead of cut short (AI-13).
+
+### Added: Transcript Studio (0.6.0 items)
+
+- **Saved structure (TS-06).** Chapters, decisions, action items and open questions are saved per
+  transcript version, with history. Every timestamp comes from your own segments.
+- **PDF export (TS-09)**, generated on the server, for transcripts and structure, alongside
+  SRT/VTT, Markdown, CSV, JSON and HTML.
+- **Batch documents (TS-10).** Create documents for many transcripts at once, with per-item status,
+  cancel and retry-failed-only. Before it starts, the batch confirms the scope and which provider
+  receives the text.
+- **Provider comparison (TS-11).** Transcribe the same recording with a second provider, after
+  confirming that the audio is sent again. The result is an independent version, compared side by
+  side.
+
+### Added: knowledge and automation (0.7.0 items)
+
+- **Recording collections (KB-01)**, with a sidebar group, "Add to collection", a list filter and
+  MCP tools.
+- **Export (KB-02).** Markdown export can copy attachments (source audio and the cited transcript
+  version) under the same conflict rules. The export folder can be chosen in the app, with a native
+  picker on desktop.
+- **Chat (KB-03).** Pin recordings to a conversation, add a project-context note, and get up to
+  three suggested follow-up questions, which are never sent automatically.
+- **Hybrid search (KB-04)** over transcript passages and notes. It uses local Ollama embeddings
+  when they are installed, a built-in offline lexical index otherwise, and cloud embeddings only
+  after an explicit opt-in. Cached passages follow Trash, purge and new transcript versions. Chat
+  can answer across the whole vault and shows which recordings it actually used.
+- **Suggestions and topics (KB-05).** Reviewable title and tag suggestions for recordings, and
+  recurring-topic summaries that you can save as documents.
+- **Jobs (KB-06).** `POST /api/v1/jobs` and an `Idempotency-Key` header on reprocessing; analysis
+  runs through the job queue.
+- **MCP scopes (KB-07).** `OPENPLOD_MCP_SCOPES` (`read`, `write:documents`, `write:folders`,
+  `process`, `deliver`), plus `start_transcription` with explicit cloud consent, `search`, and
+  collection tools.
+- **Signed webhooks (KB-08)** for imported, transcribed, document-created and failed-job events:
+  HMAC-SHA256 signatures, stable event and delivery IDs, retries with full history, an `unknown`
+  outcome for uncertain sends, and manual redelivery.
+- **Opt-in automation rules (KB-09)**, for example "Plaud meeting → transcribe with a profile →
+  meeting minutes in a folder → tag → collection → webhook". Each rule has a preview, explicit
+  approval for cloud and outside hosts, a per-step history, and idempotent retries.
+- **Reviewed task exports (KB-10).** Action items become local drafts that you edit and approve,
+  then export to Todoist, Linear, Notion or an `.ics` calendar file. Nothing is posted
+  automatically.
+
+### Added: Android and sync (0.8.0 items)
+
+- **Paired devices (MOB-06).** Each phone gets its own credential (only a hash is stored), with
+  last-seen and last-sync times, rename, revoke and rotate. The page never shows "online" based on
+  a saved pairing.
+- **Resumable uploads (MOB-02).** Phone uploads resume from the last confirmed byte. Each chunk is
+  checked with SHA-256, a transfer keeps the same ID across retries, and the whole file is verified
+  before the desktop acknowledges it. The web and Android clients both use this.
+- **Offline outbox (MOB-03)** listing pending and failed recordings, retry counts, storage used,
+  manual retry, and cleanup only after the desktop has verified its copy.
+- **Sync change feed (MOB-04)** with tombstones for Trash, restore and purge. Metadata edits are
+  pushed with a revision check: a stale edit comes back as a conflict and nothing is overwritten.
+- **Android release signing (MOB-08)** from your own keystore, plus a documented upgrade-in-place
+  path. Transfers are scoped to the client that created them (MOB-05).
+
+### Added: secure, recoverable vault (0.9.0 items)
+
+- **Crash-safe import (REL-03).** Originals and playable copies are written to staging, synced to
+  disk and renamed into place before the database commit, tracked by an import journal. Startup
+  recovers interrupted imports; free disk space is checked first.
+- **Complete purge (REL-04).** Sidecars, resume files, job payloads, search passages and import
+  events are removed too. AI answers that quoted the recording are redacted, and the purge is
+  recorded for sync.
+- **Backup and restore (REL-05).** Full-vault archives with a SHA-256 manifest and optional
+  AES-256-GCM encryption, a verify step, and a restore wizard in Settings that never overwrites a
+  vault without asking.
+- **Hardening (REL-06).** API keys, connector tokens and webhook secrets are encrypted at rest. The
+  request logger redacts secrets, file permissions are tightened, and optional TLS is available for
+  the vault server.
+- **Packaging (REL-07):**
+  - An auto-updater with a "Check for updates" control in Settings.
+  - A release workflow that builds macOS, Linux and Windows bundles with `SHA256SUMS`, signing
+    them when your keys are configured.
+  - A guard that refuses to open a vault created by a newer version.
+- **Benchmark (REL-08):** `bun run bench` on a 10,000-recording, 100,000-segment synthetic vault.
+- **Accessibility and languages (REL-09).**
+  - The interface is available in **French and English**: it follows the system language, and you
+    can change it in Settings or at first launch.
+  - `bun run check:a11y` runs an automated axe and keyboard-focus check. The issues it found are
+    fixed, and every page now passes at desktop and phone width.
+- **Transfer checksum (REL-02).** All CRC-16 variants of the device's transfer-tail checksum are
+  computed and recorded. A transfer is never rejected on an unconfirmed algorithm.
+- **New guides:** backup and restore, upgrade and migration, recovery, supported devices, provider
+  privacy and cost, automation, and mobile sync.
 
 ### Fixed
 
@@ -137,32 +250,35 @@ from a correctness and performance audit.
 
 ### Validation
 
-- 402 backend tests (`bun test`), type checking, frontend lint, build, and 33 frontend tests pass.
-  New tests cover profile storage, presets, unique names, invalid provider/model/prompt
-  combinations, profile resolution and ignored hints, deleting the default profile, the profile
-  HTTP contract, OpenAI and whisper.cpp prompt assembly, Deepgram `keywords`/`keyterm`, the
-  onboarding contract, document suggestions (normalization, Trash, malformed replies, missing key),
-  and the new MCP tool being read-only.
-- A headless-browser check against a temporary vault at 1440 px and 390 px, in dark and light
-  themes: the full setup guide, profile creation and editing, the command palette, the Transcribe
-  dialog sending the selected profile and prompt, and the suggestion error state. It found and fixed
-  two editor bugs before release. No request left the machine during the check, no console errors
-  were logged, and no page scrolled sideways.
+- All 594 tests in the root `bun test` run pass, including the 52 frontend tests, along with
+  type checking, frontend lint and the production build. `cargo check` passes for the desktop app with the updater plugin.
+- A test fails if any interface string lacks a French translation or a French entry drops a
+  placeholder.
+- `bun run check:a11y` passes on 13 routes at 1440 px and on a phone viewport with reduced motion.
+- A browser sweep of every route in French and English, at 1440 px and 390 px, against a seeded
+  vault, showed no console errors and no sideways scrolling.
+- Benchmark on a Linux laptop (not the reference Mac):
+
+  | Operation | p95 |
+  | --- | --- |
+  | List | 7.7 ms |
+  | Search | 46 ms |
+  | Detail | 0.4 ms |
 
 ### Support boundaries
 
-These are the limits 1.0.0 ships with. They are documented, not hidden:
-
-- **No live provider was called for this release.** Profile prompts, Deepgram key terms, and
-  document suggestions are covered by contract tests against recorded request shapes, not by real
-  audio or real model output. Prompt quality depends on each provider.
-- **Plaud hardware evidence is unchanged** from 0.5.1/0.6.0: one authorized Note Pro on macOS and
-  Android, discovery and connection on Linux. Other models and firmware are unverified.
-- **No signed or notarized binaries are attached to 1.0.0.** Build from source; the last prebuilt
-  macOS ZIP is 0.5.0.
-- Not in 1.0.0: backup/restore and full purge (REL-04/05), resumable Android uploads (MOB-02),
-  hybrid retrieval (KB-04), webhook events and rules (KB-08/09), spending limits (AI-10), recording
-  collections, and export attachments. They move to 1.x; see the roadmap.
+- **Live providers.** No live provider was called for this release. Every provider, connector and
+  embedding path is tested against recorded request shapes and injected responses. The prices in
+  the spending table are estimates dated in the code.
+- **Hardware.** Plaud hardware evidence is unchanged: one authorized Note Pro on macOS and Android,
+  and discovery on Linux.
+- **Android.** The Android changes (resumable upload, outbox state, checksum, signing) have not
+  been compiled on this machine or run on a phone.
+- **Transfer checksum.** Enforcement waits for one real capture to identify the algorithm.
+- **Signing.** Release signing, notarization and updater signatures need your keys. The release
+  workflow has not run on GitHub yet.
+- **Not translated:** server error messages and AI-generated text stay in the language they were
+  produced in.
 
 ## 0.6.0 - 2026-09-21
 

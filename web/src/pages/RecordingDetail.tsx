@@ -43,6 +43,7 @@ import { RecordingBookmarks } from '@/components/RecordingBookmarks'
 import { SegmentEditor } from '@/components/SegmentEditor'
 import { api, speakerLabel, type Recording, type TranscriptSegment, type TranscriptVersion } from '@/lib/api'
 import { formatDuration } from '@/lib/utils'
+import { formatDate, t } from '@/i18n'
 import { exportDocument, exportOriginalAudio, recordingMarkdown, safeDocumentName as safeName } from '@/lib/document-export'
 import { deviceCommand, supportsPlaudDevice, vaultArguments } from '@/lib/plaud-device'
 
@@ -113,7 +114,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
       setRecording(nextRecording)
       if (nextVersions) setVersions(nextVersions)
     } catch (loadError) {
-      if (ticket === loadTicket.current) setError(loadError instanceof Error ? loadError.message : 'Could not load recording')
+      if (ticket === loadTicket.current) setError(loadError instanceof Error ? loadError.message : t('Could not load recording'))
     } finally {
       if (ticket === loadTicket.current) setLoading(false)
     }
@@ -159,7 +160,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
       if (!disposed) setAudioUrl(url)
       else URL.revokeObjectURL(url)
     }).catch(audioError => {
-      if (!disposed) setError(audioError instanceof Error ? audioError.message : 'Could not load audio')
+      if (!disposed) setError(audioError instanceof Error ? audioError.message : t('Could not load audio'))
     })
     return () => {
       disposed = true
@@ -188,7 +189,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
   const summaryMarkdown = useMemo(() => summary ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{summary}</ReactMarkdown> : null, [summary])
   const sourceLabel = recording?.sourceProvider === 'plaud'
     ? 'Plaud Note Pro'
-    : recording?.sourceProvider === 'opennotes' ? 'OpenPlod mobile' : 'Local import'
+    : recording?.sourceProvider === 'opennotes' ? t('OpenPlod mobile') : t('Local import')
 
   const togglePlay = useCallback(() => {
     const audio = audioRef.current
@@ -228,7 +229,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
         await api.summarize(id)
         await loadRecording()
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : 'Action failed')
+      setError(actionError instanceof Error ? actionError.message : t('Action failed'))
     } finally {
       setAction(null)
     }
@@ -250,7 +251,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
       setEditingMetadata(false)
       flashSaved(setSaved)
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Could not save recording')
+      setError(saveError instanceof Error ? saveError.message : t('Could not save recording'))
     } finally {
       setAction(null)
     }
@@ -266,7 +267,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
       setDocumentMode('preview')
       flashSaved(setSaved)
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Could not save transcript')
+      setError(saveError instanceof Error ? saveError.message : t('Could not save transcript'))
     } finally {
       setAction(null)
     }
@@ -280,14 +281,14 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
       await api.forwardRecording(recording.id)
       await loadRecording()
     } catch (forwardError) {
-      setError(forwardError instanceof Error ? forwardError.message : 'Forwarding failed')
+      setError(forwardError instanceof Error ? forwardError.message : t('Forwarding failed'))
     } finally {
       setAction(null)
     }
   }
 
   const trashRecording = async () => {
-    if (!recording || !window.confirm('Move this recording to Trash for 30 days?')) return
+    if (!recording || !window.confirm(t('Move this recording to Trash for 30 days?'))) return
     await api.trashRecording(recording.id)
     navigate('/')
   }
@@ -305,6 +306,14 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
     void exportDocument({ filename: `${safeName(recording.title)}.${format}`, content,
       mime: format === 'md' ? 'text/markdown' : format === 'txt' ? 'text/plain' : 'application/json',
     }).catch(failure => setError(failure instanceof Error ? failure.message : String(failure)))
+  }
+
+  // Rendered by the server from the saved version, so the PDF is exactly that version (TS-09).
+  const exportPdf = () => {
+    if (!recording) return
+    void api.transcriptPdf(recording.id, selectedVersion?.id ?? recording.transcriptVersionId ?? null)
+      .then(content => exportDocument({ filename: `${safeName(recording.title)}.pdf`, content, mime: 'application/pdf' }))
+      .catch(failure => setError(failure instanceof Error ? failure.message : String(failure)))
   }
 
   const exportAudio = () => {
@@ -332,9 +341,9 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
     return (
       <div className="flex flex-col items-center p-8 text-center text-muted-foreground" role="alert">
         <AlertCircle className="mb-3 h-10 w-10 opacity-40" />
-        <p className="font-medium text-foreground">Recording unavailable</p>
-        <p className="mt-1 text-sm">{error || 'Recording not found'}</p>
-        <Button variant="outline" size="sm" className="mt-4" onClick={() => void loadRecording()}><RotateCcw />Retry</Button>
+        <p className="font-medium text-foreground">{t('Recording unavailable')}</p>
+        <p className="mt-1 text-sm">{error || t('Recording not found')}</p>
+        <Button variant="outline" size="sm" className="mt-4" onClick={() => void loadRecording()}><RotateCcw />{t('Retry')}</Button>
       </div>
     )
   }
@@ -343,47 +352,48 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
     <div className="recording-page">
       {transcribeOpen && <TranscribeDialog recordingId={recording.id} title={recording.title} onClose={() => setTranscribeOpen(false)} onQueued={() => { setRecording(current => current ? { ...current, status: 'pending' } : current) }} />}
       <header className="recording-toolbar">
-        <Link to={backPath} className="recording-back" aria-label={backPath === '/transcripts' ? 'Back to transcripts' : 'Back to library'}><ArrowLeft /></Link>
+        <Link to={backPath} className="recording-back" aria-label={backPath === '/transcripts' ? t('Back to transcripts') : t('Back to library')}><ArrowLeft /></Link>
         <div className="recording-title-block">
           {editingMetadata ? (
-            <input value={titleDraft} onChange={event => setTitleDraft(event.target.value)} className="recording-title-input" aria-label="Recording title" />
+            <input value={titleDraft} onChange={event => setTitleDraft(event.target.value)} className="recording-title-input" aria-label={t('Recording title')} />
           ) : <h1>{recording.title}</h1>}
           <p>{formatRecordingDate(recording.recordedAt)} <span /> {sourceLabel}</p>
         </div>
         <div className="recording-toolbar-actions">
           <SaveTranscriptDialog recordingId={recording.id} versionId={selectedVersion?.id ?? recording.transcriptVersionId ?? null} title={recording.title} disabled={recording.transcriptText === undefined || action !== null || documentMode === 'edit'} />
-          {saved && <span className="saved-state"><Check />Saved</span>}
+          {saved && <span className="saved-state"><Check />{t('Saved')}</span>}
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
-              <Button variant="outline" size="sm"><Download />Export<ChevronDown /></Button>
+              <Button variant="outline" size="sm"><Download />{t('Export')}<ChevronDown /></Button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
               <DropdownMenu.Content className="action-menu" align="end" sideOffset={6}>
-                <DropdownMenu.Item onSelect={() => exportCurrent('md')}><FileText />Markdown document</DropdownMenu.Item>
-                <DropdownMenu.Item onSelect={() => exportCurrent('txt')}><FileText />Transcript text</DropdownMenu.Item>
-                <DropdownMenu.Item onSelect={() => exportCurrent('json')}><FileText />JSON with metadata</DropdownMenu.Item>
-                <DropdownMenu.Item onSelect={exportAudio}><FileAudio />Original audio</DropdownMenu.Item>
+                <DropdownMenu.Item onSelect={() => exportCurrent('md')}><FileText />{t('Markdown document')}</DropdownMenu.Item>
+                <DropdownMenu.Item onSelect={() => exportCurrent('txt')}><FileText />{t('Transcript text')}</DropdownMenu.Item>
+                <DropdownMenu.Item onSelect={() => exportCurrent('json')}><FileText />{t('JSON with metadata')}</DropdownMenu.Item>
+                <DropdownMenu.Item disabled={recording.transcriptText === undefined} onSelect={exportPdf}><FileText />{t('PDF document')}</DropdownMenu.Item>
+                <DropdownMenu.Item onSelect={exportAudio}><FileAudio />{t('Original audio')}</DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
           <DropdownMenu.Root>
-            <DropdownMenu.Trigger asChild><Button variant="ghost" size="icon" aria-label="More recording actions"><MoreHorizontal /></Button></DropdownMenu.Trigger>
+            <DropdownMenu.Trigger asChild><Button variant="ghost" size="icon" aria-label={t('More recording actions')}><MoreHorizontal /></Button></DropdownMenu.Trigger>
             <DropdownMenu.Portal>
               <DropdownMenu.Content className="action-menu" align="end" sideOffset={6}>
-                <DropdownMenu.Item onSelect={() => setEditingMetadata(true)}><Pencil />Edit details</DropdownMenu.Item>
-                <DropdownMenu.Item onSelect={() => void forward()}><CloudUpload />Send to OpenWhistle</DropdownMenu.Item>
-                <DropdownMenu.Item onSelect={() => void runAction('transcribing')}><RotateCcw />Transcribe again</DropdownMenu.Item>
+                <DropdownMenu.Item onSelect={() => setEditingMetadata(true)}><Pencil />{t('Edit details')}</DropdownMenu.Item>
+                <DropdownMenu.Item onSelect={() => void forward()}><CloudUpload />{t('Send to OpenWhistle')}</DropdownMenu.Item>
+                <DropdownMenu.Item onSelect={() => void runAction('transcribing')}><RotateCcw />{t('Transcribe again')}</DropdownMenu.Item>
                 <DropdownMenu.Separator />
-                <DropdownMenu.Item className="danger" onSelect={() => void trashRecording()}><Trash2 />Move to Trash</DropdownMenu.Item>
+                <DropdownMenu.Item className="danger" onSelect={() => void trashRecording()}><Trash2 />{t('Move to Trash')}</DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
         </div>
       </header>
 
-      {error && <div className="recording-error" role="alert"><AlertCircle /><span>{error}</span><button type="button" onClick={() => setError('')} aria-label="Dismiss error"><X /></button></div>}
+      {error && <div className="recording-error" role="alert"><AlertCircle /><span>{error}</span><button type="button" onClick={() => setError('')} aria-label={t('Dismiss error')}><X /></button></div>}
 
-      <section className="player-strip" aria-label="Audio player">
+      <section className="player-strip" aria-label={t('Audio player')}>
         <audio
           ref={audioRef}
           src={audioUrl || undefined}
@@ -410,33 +420,33 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
           onEnded={() => setPlaying(false)}
           onPause={() => setPlaying(false)}
           onPlay={() => setPlaying(true)}
-          onError={() => { setPlaying(false); setError('This audio could not be played. Download the original or reload the recording.'); }}
+          onError={() => { setPlaying(false); setError(t('This audio could not be played. Download the original or reload the recording.')); }}
         />
-        <Button className="player-main" size="icon" onClick={togglePlay} aria-label={playing ? 'Pause' : 'Play'}>{playing ? <Pause /> : <Play />}</Button>
+        <Button className="player-main" size="icon" onClick={togglePlay} aria-label={playing ? t('Pause') : t('Play')}>{playing ? <Pause /> : <Play />}</Button>
         <div className="player-timeline">
-          <input type="range" className="audio-timeline" min={0} max={duration || recording.duration || 1} step={0.1} value={currentTime} onChange={event => seekTo(Number(event.target.value), false)} aria-label="Seek in audio" aria-valuetext={`${formatDuration(currentTime)} of ${formatDuration(duration || recording.duration)}`} />
+          <input type="range" className="audio-timeline" min={0} max={duration || recording.duration || 1} step={0.1} value={currentTime} onChange={event => seekTo(Number(event.target.value), false)} aria-label={t('Seek in audio')} aria-valuetext={t('{current} of {total}', { current: formatDuration(currentTime), total: formatDuration(duration || recording.duration) })} />
           <div className="player-time"><span>{formatDuration(currentTime)}</span><span>{formatDuration(duration || recording.duration)}</span></div>
         </div>
         <div className="player-skip">
           <PlaybackSpeedMenu value={playbackRate} onChange={value => { setPlaybackRate(value); if (audioRef.current) audioRef.current.playbackRate = value }} />
-          <IconButton onClick={() => seekTo(Math.max(0, currentTime - 15))} label="Back 15 seconds"><Undo2 /></IconButton>
-          <IconButton onClick={() => seekTo(Math.min(duration || recording.duration, currentTime + 15))} label="Forward 15 seconds"><Redo2 /></IconButton>
+          <IconButton onClick={() => seekTo(Math.max(0, currentTime - 15))} label={t('Back 15 seconds')}><Undo2 /></IconButton>
+          <IconButton onClick={() => seekTo(Math.min(duration || recording.duration, currentTime + 15))} label={t('Forward 15 seconds')}><Redo2 /></IconButton>
         </div>
       </section>
 
       <div className="recording-workspace">
         <main className="document-pane">
           <div className="document-toolbar">
-            <ToggleGroup type="single" className="document-modes" value={documentMode} onValueChange={value => { if (value === 'preview' || value === 'edit' || value === 'timestamps' || value === 'studio') { if (value === 'edit') setSelectedVersion(null); setDocumentMode(value) } }} aria-label="Transcript view">
-              <ToggleGroupItem value="preview"><FileText />Markdown</ToggleGroupItem><ToggleGroupItem value="edit"><Pencil />Edit</ToggleGroupItem><ToggleGroupItem value="timestamps"><ListTree />Transcript</ToggleGroupItem><ToggleGroupItem value="studio"><Wand2 />Studio</ToggleGroupItem>
+            <ToggleGroup type="single" className="document-modes" value={documentMode} onValueChange={value => { if (value === 'preview' || value === 'edit' || value === 'timestamps' || value === 'studio') { if (value === 'edit') setSelectedVersion(null); setDocumentMode(value) } }} aria-label={t('Transcript view')}>
+              <ToggleGroupItem value="preview"><FileText />Markdown</ToggleGroupItem><ToggleGroupItem value="edit"><Pencil />{t('Edit')}</ToggleGroupItem><ToggleGroupItem value="timestamps"><ListTree />{t('Transcript')}</ToggleGroupItem><ToggleGroupItem value="studio"><Wand2 />{t('Studio')}</ToggleGroupItem>
             </ToggleGroup>
             {documentMode === 'edit' && (
-              <Button size="sm" onClick={() => void saveTranscript()} disabled={action !== null || recording.transcriptText === undefined}><Save />Save version</Button>
+              <Button size="sm" onClick={() => void saveTranscript()} disabled={action !== null || recording.transcriptText === undefined}><Save />{t('Save version')}</Button>
             )}
           </div>
 
           {selectedVersion && (
-            <div className="version-banner"><History /><span>Viewing {selectedVersion.origin} version from {formatVersionDate(selectedVersion.createdAt)}</span><button type="button" onClick={() => setSelectedVersion(null)}>Back to current</button></div>
+            <div className="version-banner"><History /><span>{selectedVersion.origin === 'edited' ? t('Viewing edited version from {date}', { date: formatVersionDate(selectedVersion.createdAt) }) : t('Viewing generated version from {date}', { date: formatVersionDate(selectedVersion.createdAt) })}</span><button type="button" onClick={() => setSelectedVersion(null)}>{t('Back to current')}</button></div>
           )}
 
           <article className="document-surface">
@@ -444,7 +454,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
               <TranscriptStudio recording={recording} onChanged={loadRecording} />
             ) : documentMode === 'edit' ? (
               recording.transcriptText !== undefined ? (
-                <textarea className="markdown-editor" aria-label="Transcript Markdown" value={transcriptDraft} onChange={event => setTranscriptDraft(event.target.value)} spellCheck />
+                <textarea className="markdown-editor" aria-label={t('Transcript Markdown')} value={transcriptDraft} onChange={event => setTranscriptDraft(event.target.value)} spellCheck />
               ) : <TranscriptEmpty action={action} onTranscribe={() => void runAction('transcribing')} />
             ) : documentMode === 'timestamps' ? (
               displaySegments.length ? (
@@ -452,9 +462,9 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
                 <div className="segment-follow">
                   <label>
                     <input type="checkbox" checked={following} onChange={event => setFollowing(event.target.checked)} />
-                    Follow playback
+                    {t('Follow playback')}
                   </label>
-                  <small>{wordTiming ? 'Word timings available' : 'No word timings from this provider; following by segment'}</small>
+                  <small>{wordTiming ? t('Word timings available') : t('No word timings from this provider; following by segment')}</small>
                 </div>
                 <div className="segment-list">
                   {displaySegments.map((segment, index) => (
@@ -471,7 +481,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
                   ))}
                 </div>
                 </>
-              ) : displayText ? <p className="p-6 text-sm text-muted-foreground">This transcript version has no timestamp data. Its text is available in Markdown.</p> : <TranscriptEmpty action={action} onTranscribe={() => void runAction('transcribing')} />
+              ) : displayText ? <p className="p-6 text-sm text-muted-foreground">{t('This transcript version has no timestamp data. Its text is available in Markdown.')}</p> : <TranscriptEmpty action={action} onTranscribe={() => void runAction('transcribing')} />
             ) : displayText ? (
               <div className="markdown-document">{transcriptMarkdown}</div>
             ) : <TranscriptEmpty action={action} onTranscribe={() => void runAction('transcribing')} />}
@@ -481,54 +491,54 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
         <aside className="recording-inspector">
           <RecordingBookmarks recordingId={recording.id} currentTime={currentTime} seek={seekTo} />
           <section>
-            <div className="inspector-heading"><span>Details</span><button type="button" onClick={() => setEditingMetadata(value => !value)} aria-label="Edit recording details"><Pencil /></button></div>
+            <div className="inspector-heading"><span>{t('Details')}</span><button type="button" onClick={() => setEditingMetadata(value => !value)} aria-label={t('Edit recording details')}><Pencil /></button></div>
             {editingMetadata ? (
               <div className="metadata-form">
-                <label>Context<input value={contextDraft} onChange={event => setContextDraft(event.target.value)} placeholder="What was this about?" /></label>
-                <label>Tags<input value={tagsDraft} onChange={event => setTagsDraft(event.target.value)} placeholder="meeting, idea" /></label>
-                <label>Notes<textarea value={notesDraft} onChange={event => setNotesDraft(event.target.value)} rows={5} /></label>
-                <div className="metadata-buttons"><Button size="sm" onClick={() => void saveMetadata()} disabled={action !== null}><Save />Save</Button><Button size="sm" variant="ghost" onClick={() => setEditingMetadata(false)}><X />Cancel</Button></div>
+                <label>{t('Context')}<input value={contextDraft} onChange={event => setContextDraft(event.target.value)} placeholder={t('What was this about?')} /></label>
+                <label>{t('Tags')}<input value={tagsDraft} onChange={event => setTagsDraft(event.target.value)} placeholder={t('meeting, idea')} /></label>
+                <label>{t('Notes')}<textarea value={notesDraft} onChange={event => setNotesDraft(event.target.value)} rows={5} /></label>
+                <div className="metadata-buttons"><Button size="sm" onClick={() => void saveMetadata()} disabled={action !== null}><Save />{t('Save')}</Button><Button size="sm" variant="ghost" onClick={() => setEditingMetadata(false)}><X />{t('Cancel')}</Button></div>
               </div>
             ) : (
               <dl className="metadata-list">
-                <div><dt>Status</dt><dd><Badge variant={recording.status === 'complete' ? 'success' : recording.status === 'failed' ? 'destructive' : 'warning'}>{recording.status}</Badge></dd></div>
-                <div><dt>Duration</dt><dd>{formatDuration(duration || recording.duration)}</dd></div>
-                <div><dt>Context</dt><dd>{recording.context || 'None'}</dd></div>
-                <div><dt>Tags</dt><dd>{recording.tags.length ? recording.tags.join(', ') : 'None'}</dd></div>
+                <div><dt>{t('Status')}</dt><dd><Badge variant={recording.status === 'complete' ? 'success' : recording.status === 'failed' ? 'destructive' : 'warning'}>{statusLabel(recording.status)}</Badge></dd></div>
+                <div><dt>{t('Duration')}</dt><dd>{formatDuration(duration || recording.duration)}</dd></div>
+                <div><dt>{t('Context')}</dt><dd>{recording.context || t('None')}</dd></div>
+                <div><dt>{t('Tags')}</dt><dd>{recording.tags.length ? recording.tags.join(', ') : t('None')}</dd></div>
               </dl>
             )}
-            <label className="replace-audio"><Upload />Replace original audio<input type="file" accept="audio/*" onChange={event => {
+            <label className="replace-audio"><Upload />{t('Replace original audio')}<input type="file" accept="audio/*" onChange={event => {
               const file = event.target.files?.[0]
               if (!file) return
-              void api.replaceAudio(recording.id, file, recording.revision).then(() => loadRecording()).catch(replaceError => setError(replaceError instanceof Error ? replaceError.message : 'Could not replace audio'))
+              void api.replaceAudio(recording.id, file, recording.revision).then(() => loadRecording()).catch(replaceError => setError(replaceError instanceof Error ? replaceError.message : t('Could not replace audio')))
             }} /></label>
           </section>
 
           <section>
-            <div className="inspector-heading"><span>Summary</span><AlignLeft /></div>
+            <div className="inspector-heading"><span>{t('Summary')}</span><AlignLeft /></div>
             {recording.summary ? <div className="inspector-summary">{summaryMarkdown}</div> : (
-              <div className="inspector-empty"><p>No summary yet.</p><Button variant="outline" size="sm" onClick={() => void runAction('summarizing')} disabled={action !== null}>{action === 'summarizing' ? <Loader2 className="animate-spin" /> : <AlignLeft />}Generate</Button></div>
+              <div className="inspector-empty"><p>{t('No summary yet.')}</p><Button variant="outline" size="sm" onClick={() => void runAction('summarizing')} disabled={action !== null}>{action === 'summarizing' ? <Loader2 className="animate-spin" /> : <AlignLeft />}{t('Generate')}</Button></div>
             )}
           </section>
 
           <section>
-            <div className="inspector-heading"><span>Version history</span><History /></div>
+            <div className="inspector-heading"><span>{t('Version history')}</span><History /></div>
             {versions.length ? (
               <div className="version-list">
                 {versions.map(version => (
                   <button type="button" key={version.id} onClick={() => { setSelectedVersion(version); setDocumentMode('preview') }}>
-                    <span className={`version-origin ${version.origin}`}>{version.origin === 'edited' ? 'Edited' : 'Generated'}</span>
+                    <span className={`version-origin ${version.origin}`}>{version.origin === 'edited' ? t('Edited') : t('Generated')}</span>
                     <span>{formatVersionDate(version.createdAt)}</span>
                   </button>
                 ))}
               </div>
-            ) : <p className="inspector-muted">Versions appear after transcription or an edit.</p>}
+            ) : <p className="inspector-muted">{t('Versions appear after transcription or an edit.')}</p>}
             {selectedVersion?.provenance && <dl className="grid gap-2 py-3 text-xs break-words">
-              <div><dt className="text-muted-foreground">Provider / model</dt><dd>{selectedVersion.provenance.provider} / {selectedVersion.provenance.model}</dd></div>
-              <div><dt className="text-muted-foreground">Source SHA-256</dt><dd>{selectedVersion.provenance.fingerprint || 'Unknown'}</dd></div>
-              <div><dt className="text-muted-foreground">Completed</dt><dd>{selectedVersion.provenance.completedAt || 'Unknown'}</dd></div>
-              <div><dt className="text-muted-foreground">Reported usage</dt><dd>{selectedVersion.provenance.usage ? JSON.stringify(selectedVersion.provenance.usage) : 'Not reported'}</dd></div>
-              <div><dt className="text-muted-foreground">Options</dt><dd>{JSON.stringify(selectedVersion.provenance.options || {})}</dd></div>
+              <div><dt className="text-muted-foreground">{t('Provider / model')}</dt><dd>{selectedVersion.provenance.provider} / {selectedVersion.provenance.model}</dd></div>
+              <div><dt className="text-muted-foreground">{t('Source SHA-256')}</dt><dd>{selectedVersion.provenance.fingerprint || t('Unknown')}</dd></div>
+              <div><dt className="text-muted-foreground">{t('Completed')}</dt><dd>{selectedVersion.provenance.completedAt || t('Unknown')}</dd></div>
+              <div><dt className="text-muted-foreground">{t('Reported usage')}</dt><dd>{selectedVersion.provenance.usage ? JSON.stringify(selectedVersion.provenance.usage) : t('Not reported')}</dd></div>
+              <div><dt className="text-muted-foreground">{t('Options')}</dt><dd>{JSON.stringify(selectedVersion.provenance.options || {})}</dd></div>
             </dl>}
           </section>
         </aside>
@@ -541,23 +551,27 @@ function TranscriptEmpty({ action, onTranscribe }: { action: BusyAction; onTrans
   return (
     <div className="document-empty">
       <FileText />
-      <h2>No transcript yet</h2>
-      <p>Transcribe this audio with your configured engine, then edit it as Markdown.</p>
-      <Button onClick={onTranscribe} disabled={action !== null}>{action === 'transcribing' ? <Loader2 className="animate-spin" /> : <AudioLines />}Transcribe audio</Button>
+      <h2>{t('No transcript yet')}</h2>
+      <p>{t('Transcribe this audio with your configured engine, then edit it as Markdown.')}</p>
+      <Button onClick={onTranscribe} disabled={action !== null}>{action === 'transcribing' ? <Loader2 className="animate-spin" /> : <AudioLines />}{t('Transcribe audio')}</Button>
     </div>
   )
 }
 
 function formatRecordingDate(value: string): string {
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return 'Date unavailable'
-  return date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+  if (Number.isNaN(date.getTime())) return t('Date unavailable')
+  return formatDate(date, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 function formatVersionDate(value: string): string {
   const date = new Date(value.endsWith('Z') ? value : `${value}Z`)
   if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return formatDate(date, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+function statusLabel(status: Recording['status']): string {
+  return { pending: t('Pending'), transcribing: t('Transcribing'), summarizing: t('Summarizing'), complete: t('Complete'), failed: t('Failed') }[status] ?? status
 }
 
 function flashSaved(setSaved: (value: boolean) => void) {

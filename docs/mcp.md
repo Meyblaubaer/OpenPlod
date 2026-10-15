@@ -36,6 +36,8 @@ The MCP client accepts HTTP only for loopback hosts. Remote vault connections re
 
 ## Read-Only by Default
 
+These tools need only the `read` scope, which is always granted. They map to `GET` requests on the vault API.
+
 | Tool | Purpose |
 | --- | --- |
 | `list_documents` | Search/filter/paginate Markdown notes by folder, star, Trash, tag, and text |
@@ -55,6 +57,9 @@ The MCP client accepts HTTP only for loopback hosts. Remote vault connections re
 | `list_transcript_backlinks` | Active notes that cite one exact transcript version (Trash excluded) |
 | `list_jobs` | Processing jobs, newest first, filterable by state and recording |
 | `get_job` | One processing job: state, provider, checkpoint, error, and produced transcript version ids |
+| `search` | Hybrid search over current transcript versions and active notes: passages with exact version, segment range, times from the stored segments, score, and matching retrievers |
+| `list_collections` | Recording collections with active recording counts |
+| `get_collection` | One collection and its active recording ids |
 
 The source, version, job, view, export-status, and profile tools (0.7.0 and 1.0.0, roadmap KB-07) only read. Profiles cannot be created or changed through MCP, and AI title/tag suggestions are not exposed because they call a provider. Running a Markdown export writes to the filesystem, so it is not available through MCP, even with writes enabled. `get_job` and `list_jobs` report what the queue already knows; they never contact a transcription provider, retry, resume, or cancel anything. Unknown note, version, and job ids are errors (`Not found`), never empty results. A note whose cited transcript version no longer exists is reported as `unknown`; the current text is never substituted.
 Resources use `openplod://documents/{id}` with `text/markdown`. Resource discovery returns up to 100 active notes; use `list_documents` for complete pagination or search.
@@ -67,23 +72,22 @@ Examples of requests to your MCP-enabled assistant:
 - "Which of my notes were written from an older version of this transcript?"
 - "Did last night's transcription jobs finish?"
 
-## Optional Write Tools
+## Permission Scopes
 
-Set `OPENPLOD_MCP_WRITE=1` in the MCP process environment to register:
+Set `OPENPLOD_MCP_SCOPES` (comma- or space-separated) in the MCP process environment. `read` is always granted; an unknown scope stops the server with an error. `OPENPLOD_MCP_WRITE=1` still works and means `write:documents,write:folders`.
 
-| Tool | Purpose |
+| Scope | Tools |
 | --- | --- |
-| `create_document` | Create a note with a caller-generated idempotency key |
-| `update_document` | Edit, rename, star, tag, set properties on, or move a note with its current revision |
-| `save_transcript` | Save a provenance-linked snapshot of a transcript version |
-| `create_folder` | Create a folder, optionally under an existing folder |
-| `update_folder` | Rename/move a folder with cycle and revision checks |
-| `trash_document` | Move a note to 30-day Trash; requires `confirm: true` |
-| `restore_document` | Restore a note within its retention window |
+| `write:documents` | `create_document` (caller idempotency key), `update_document` (current revision), `save_transcript` (provenance-linked snapshot), `trash_document` (`confirm: true`), `restore_document` |
+| `write:folders` | `create_folder`, `update_folder` (cycle and revision checks) |
+| `process` | `start_transcription` (`recordingId`, `confirm: true`, `idempotencyKey`, `acceptCloudProvider`): it first asks the vault for the plan (`POST /api/v1/jobs` with `dryRun`) and, when the configured provider is a cloud service (audio leaves the computer and may be billed), refuses until repeated with `acceptCloudProvider: true` after the person agreed. Retries with the same key return the same job. It cannot confirm a cost: when a monthly budget or per-job threshold in AI settings requires [cost confirmation](api.md#cost-confirmation), the vault refuses with `409 cost_confirmation_required`, which the MCP client currently reports only as a generic "Conflict" error (the same message as a revision conflict or an already running job), and the person must start the transcription from the app |
+| `deliver` | `list_destinations` (read-only: configured names and hosts), `send_document` (`confirm: true`, current revision, idempotency key) |
 
-Write tools are absent, not merely hidden in documentation, when the flag is unset. MCP annotations help clients display intent; they do not substitute for your client's approval controls. Enable writes only for trusted clients and require approval for mutations where your client supports it.
+The complete tool set registered in `src/mcp/server.ts` is the 20 read tools above plus these 10 scoped tools. Scopes are read once when the MCP process starts; change `OPENPLOD_MCP_SCOPES` and restart the client's MCP server to change them.
 
-The MCP server intentionally exposes **no permanent purge, external delivery, credential management, device reset, recording deletion, or raw-audio download tool**. Send documents from the app or authenticated API after reviewing the destination. A write-enabled client can change Markdown notes, not the source transcript or recording.
+Tools outside the granted scopes are absent, not merely hidden in documentation. MCP annotations help clients display intent; they do not substitute for your client's approval controls. Enable writes only for trusted clients and require approval for mutations where your client supports it.
+
+The MCP server intentionally exposes **no permanent purge, credential management, device reset, recording deletion, raw-audio download, export-folder, or search-settings tool**, and no tools for AI settings or spending, webhooks, automation rules, task exports, paired mobile devices, or vault backup and restore; external delivery exists only under the opt-in `deliver` scope. Transcript and document text never authorizes a tool call: start a transcription or send a note only when the person asked for it. A write-enabled client can change Markdown notes, not the source transcript or recording.
 
 ## Privacy and Error Handling
 

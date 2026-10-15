@@ -8,7 +8,7 @@ import java.io.File
 
 class PlaudExports(private val activity: Activity) {
     fun document(filename: String, content: String, mime: String) {
-        require(mime in setOf("text/markdown", "text/plain", "application/json")) { "Unsupported document format." }
+        require(mime in setOf("text/markdown", "text/plain", "application/json", "text/csv", "text/html", "application/pdf", "application/x-subrip", "text/vtt")) { "Unsupported document format." }
         require(content.toByteArray().size <= 10 * 1024 * 1024) { "Document is too large to export." }
         val safeName = filename.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(120).ifEmpty { "transcript.md" }
         val directory = File(activity.cacheDir, "document-exports").apply { mkdirs() }

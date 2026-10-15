@@ -15,6 +15,18 @@ export interface LocalPlaudRecording {
   fingerprint: string
   recordedAt: string
   desktopRecordingId: string | null
+  /** Outbox state kept by the native store (MOB-03); absent on older app data. */
+  uploadAttempts?: number
+  lastUploadError?: string | null
+  transferId?: string | null
+}
+
+/** Native outbox summary; absent on older app builds. */
+export interface NativeOutboxSummary {
+  pending: number
+  failed: number
+  acknowledged: number
+  bytes: number
 }
 
 export interface DeviceSnapshot {
@@ -31,6 +43,7 @@ export interface DeviceSnapshot {
   files: DeviceRecording[]
   devices: { serial: string; name: string; rssi: number }[]
   localRecordings: LocalPlaudRecording[]
+  outbox?: NativeOutboxSummary
   downloading: boolean
   progress: number
   playingId: string | null
