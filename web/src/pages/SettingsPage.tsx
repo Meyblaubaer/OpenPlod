@@ -9,6 +9,7 @@ import { getRuntime } from '@/lib/runtime'
 import { buildInfo, buildLabel } from '@/lib/build-info'
 import { AiSettingsPanel } from '@/components/AiSettingsPanel'
 import { TranscriptionProfilesPanel } from '@/components/TranscriptionProfilesPanel'
+import { UpdatePanel } from '@/components/UpdatePanel'
 import { BackupRestorePanel } from '@/components/BackupRestorePanel'
 import { ONBOARDING_EVENT, onboardingApi } from '@/lib/ai-settings'
 
@@ -122,6 +123,7 @@ export function SettingsPage() {
         <summary className="cursor-pointer text-sm text-muted-foreground">About OpenPlod</summary>
         <dl className="grid gap-3 py-4 text-sm"><div><dt className="text-muted-foreground">Version</dt><dd>{buildInfo.version}</dd></div><div><dt className="text-muted-foreground">Installed build</dt><dd><time dateTime={buildInfo.builtAt}>{buildLabel}</time></dd></div><div><dt className="text-muted-foreground">Platform</dt><dd>{runtime.mode === 'desktop' ? 'Desktop' : runtime.mode === 'mobile' ? 'Mobile' : 'Browser'}</dd></div></dl>
         <Button variant="outline" onClick={() => { void onboardingApi.reset().catch(() => {}).finally(() => window.dispatchEvent(new Event(ONBOARDING_EVENT))) }}><Rocket />Run the setup guide again</Button>
+        <UpdatePanel />
       </details>
 
       <details id="pairing" ref={pairingSection} className="border-b pb-4">

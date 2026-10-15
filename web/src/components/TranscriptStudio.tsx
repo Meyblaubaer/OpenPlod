@@ -10,6 +10,7 @@ import {
   type TranscriptDiff, type TranscriptStructure, type TranscriptVersion, type TranslationProposal, type VersionComparison,
 } from '@/lib/api'
 import { exportDocument, safeDocumentName } from '@/lib/document-export'
+import { apiUrl, authenticatedHeaders } from '@/lib/runtime'
 import { providerVersionPair, versionTitle } from '@/lib/provider-versions'
 import './transcript-studio.css'
 
@@ -804,7 +805,15 @@ function StructurePanel({ recording, busy, run }: { recording: Recording; busy: 
     setSelectedId(select ?? rows[0]?.id ?? '')
   }
 
-  const download = (path: string) => { window.open(`/api/recordings/${recording.id}${path}`, '_blank', 'noopener') }
+  // Fetched with the vault token and saved through the platform export path; a bare
+  // window.open would carry no token and fail whenever API authentication is on.
+  const download = async (path: string, extension: string) => {
+    try {
+      const response = await fetch(apiUrl(`/recordings/${recording.id}${path}`), { headers: authenticatedHeaders() })
+      if (!response.ok) throw new Error(`Subtitle export failed (HTTP ${response.status}).`)
+      await exportDocument({ filename: `${safeDocumentName(recording.title)}.${extension}`, content: await response.text(), mime: extension === 'srt' ? 'application/x-subrip' : 'text/vtt' })
+    } catch (failure) { setLoadError(message(failure)) }
+  }
   const selected = saved?.find(row => row.id === selectedId) ?? null
 
   return (
@@ -815,9 +824,9 @@ function StructurePanel({ recording, busy, run }: { recording: Recording; busy: 
         : subtitles.exportable
           ? (
             <div className="tstudio-actions">
-              <Button variant="outline" size="sm" onClick={() => download('/transcript/subtitles?format=srt')}><Download />SRT</Button>
-              <Button variant="outline" size="sm" onClick={() => download('/transcript/subtitles?format=vtt')}><Download />VTT</Button>
-              <Button variant="outline" size="sm" onClick={() => download('/transcript/subtitles?format=vtt&speakerLabels=1')}><Download />VTT with speakers</Button>
+              <Button variant="outline" size="sm" onClick={() => void download('/transcript/subtitles?format=srt', 'srt')}><Download />SRT</Button>
+              <Button variant="outline" size="sm" onClick={() => void download('/transcript/subtitles?format=vtt', 'vtt')}><Download />VTT</Button>
+              <Button variant="outline" size="sm" onClick={() => void download('/transcript/subtitles?format=vtt&speakerLabels=1', 'vtt')}><Download />VTT with speakers</Button>
             </div>
           )
           : <p className="tstudio-empty">{subtitles.detail}</p>}
