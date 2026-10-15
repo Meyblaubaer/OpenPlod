@@ -13,6 +13,37 @@ val tauriProperties = Properties().apply {
     }
 }
 
+// Version fallback when tauri.properties has not been generated yet: read src-tauri/tauri.conf.json
+// and derive versionCode the way the Tauri CLI does (major * 1_000_000 + minor * 1_000 + patch), so
+// every build of the same version shares one monotonically increasing code.
+val tauriConfigVersion: String? = file("../../../tauri.conf.json").takeIf { it.exists() }?.let { config ->
+    Regex("\"version\"\\s*:\\s*\"([0-9]+\\.[0-9]+\\.[0-9]+)[^\"]*\"").find(config.readText())?.groupValues?.get(1)
+}
+val fallbackVersionCode: Int = tauriConfigVersion?.split('.')?.map { it.toInt() }
+    ?.let { (major, minor, patch) -> major * 1_000_000 + minor * 1_000 + patch } ?: 1
+
+// Release signing (MOB-08). Values come from the environment first, then from an untracked
+// keystore.properties next to this module's parent (src-tauri/gen/android/keystore.properties):
+//   storeFile=/absolute/path/openplod-release.jks
+//   storePassword=...
+//   keyAlias=openplod
+//   keyPassword=...
+// Neither the keystore nor the properties file is ever committed (see .gitignore). Keep the same
+// key and applicationId for every release, or Android refuses the in-place upgrade.
+val keystoreProperties = Properties().apply {
+    val propFile = rootProject.file("keystore.properties")
+    if (propFile.exists()) {
+        propFile.inputStream().use { load(it) }
+    }
+}
+fun signingValue(property: String, environment: String): String? =
+    System.getenv(environment)?.takeIf { it.isNotBlank() } ?: keystoreProperties.getProperty(property)?.takeIf { it.isNotBlank() }
+val releaseStoreFile = signingValue("storeFile", "OPENPLOD_ANDROID_KEYSTORE")
+val releaseSigningConfigured = releaseStoreFile != null &&
+    signingValue("storePassword", "OPENPLOD_ANDROID_KEYSTORE_PASSWORD") != null &&
+    signingValue("keyAlias", "OPENPLOD_ANDROID_KEY_ALIAS") != null &&
+    signingValue("keyPassword", "OPENPLOD_ANDROID_KEY_PASSWORD") != null
+
 android {
     compileSdk = 36
     namespace = "com.openplod.vault"
@@ -23,8 +54,20 @@ android {
         minSdk = 24
         targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
-        versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+        versionCode = tauriProperties.getProperty("tauri.android.versionCode")?.toInt() ?: fallbackVersionCode
+        versionName = tauriProperties.getProperty("tauri.android.versionName") ?: tauriConfigVersion ?: "1.0"
+    }
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = signingValue("storePassword", "OPENPLOD_ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = signingValue("keyAlias", "OPENPLOD_ANDROID_KEY_ALIAS")
+                keyPassword = signingValue("keyPassword", "OPENPLOD_ANDROID_KEY_PASSWORD")
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -40,6 +83,9 @@ android {
             }
         }
         getByName("release") {
+            // Without signing values the release build stays unsigned (and is not installable),
+            // which is safer than silently signing a release with the debug key.
+            if (releaseSigningConfigured) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }

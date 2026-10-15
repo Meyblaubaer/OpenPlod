@@ -69,9 +69,43 @@ class PlaudStore(context: Context) {
     @Synchronized fun acknowledge(id: String, recordingId: String, expected: String) {
         val current = rows[id] ?: error("Recording missing.")
         check(current.getString("fingerprint") == expected) { "Desktop audio fingerprint does not match. Local audio retained." }
-        val previous = current.opt("desktopRecordingId")
-        current.put("desktopRecordingId", recordingId)
-        try { persist() } catch (error: Exception) { current.put("desktopRecordingId", previous); throw error }
+        update(id) {
+            it.put("desktopRecordingId", recordingId).put("acknowledgedAt", System.currentTimeMillis())
+                .put("lastUploadError", JSONObject.NULL)
+        }
+    }
+
+    /** Persists the resumable transfer ID before any byte is sent, so a retry resumes it. */
+    @Synchronized fun recordTransfer(id: String, transferId: String) = update(id) { it.put("transferId", transferId) }
+
+    /** Keeps the failed attempt visible in the outbox. The local audio is untouched. */
+    @Synchronized fun recordUploadFailure(id: String, message: String) = update(id) {
+        it.put("uploadAttempts", it.optInt("uploadAttempts", 0) + 1).put("lastUploadError", message.take(300))
+            .put("lastUploadAt", System.currentTimeMillis())
+    }
+
+    /**
+     * Outbox summary (MOB-03): recordings still waiting for a durable desktop acknowledgement,
+     * how many of those last failed, and the local storage they use. Nothing is ever deleted
+     * automatically; acknowledged recordings stay until the owner removes them.
+     */
+    @Synchronized fun outbox(): JSONObject {
+        var pending = 0; var failed = 0; var acknowledged = 0; var bytes = 0L
+        for (row in rows.values) {
+            bytes += row.optLong("size", 0L)
+            if (row.isNull("desktopRecordingId")) {
+                pending += 1
+                if (!row.isNull("lastUploadError") && row.optString("lastUploadError").isNotEmpty()) failed += 1
+            } else acknowledged += 1
+        }
+        return JSONObject().put("pending", pending).put("failed", failed).put("acknowledged", acknowledged).put("bytes", bytes)
+    }
+
+    private fun update(id: String, change: (JSONObject) -> Unit) {
+        val current = rows[id] ?: error("Recording missing.")
+        val previous = JSONObject(current.toString())
+        change(current)
+        try { persist() } catch (error: Exception) { rows[id] = previous; throw error }
     }
 
     private fun persist() {

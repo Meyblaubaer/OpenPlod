@@ -1,5 +1,6 @@
 import { sqlite } from './client';
 import { initializeOrganizer } from '../organizer/store';
+import { initializeMobileSync } from '../sync/mobile-schema';
 
 const SCHEMA_VERSION = 4;
 
@@ -163,5 +164,7 @@ export function initializeDatabase() {
   // Library and transcript lists filter by retention and sort by recording date.
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_recordings_retention_recorded ON recordings(retention_state, recorded_at DESC)');
   sqlite.transaction(() => initializeOrganizer(sqlite))();
+  // Paired clients, resumable uploads, and the sync change feed (additive tables and triggers).
+  sqlite.transaction(() => initializeMobileSync(sqlite))();
   sqlite.exec('PRAGMA optimize');
 }

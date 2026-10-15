@@ -4,9 +4,10 @@ import { ArrowLeft, Check, FileAudio, Loader2, Mic, Pause, Play, RotateCcw, Squa
 import { Button } from '@/components/ui/button'
 import { PlaudImportDialog } from '@/components/PlaudImportDialog'
 import { Input } from '@/components/ui/input'
-import { api } from '@/lib/api'
 import { getRuntime } from '@/lib/runtime'
-import { latestPendingCapture, removePendingCapture, savePendingCapture, type PendingCapture } from '@/lib/recording-outbox'
+import { cleanupStoredCaptures, latestPendingCapture, removePendingCapture, savePendingCapture, updateCapture, type PendingCapture } from '@/lib/recording-outbox'
+import { deliverCapture } from '@/lib/outbox-delivery'
+import { OutboxPanel } from '@/components/OutboxPanel'
 import { formatDuration } from '@/lib/utils'
 import { completePendingAndroidShare, readPendingAndroidShare } from '@/lib/android-share'
 
@@ -24,6 +25,8 @@ export function RecordingPage() {
   const [title, setTitle] = useState(defaultTitle)
   const [context, setContext] = useState('')
   const [error, setError] = useState('')
+  const [progress, setProgress] = useState<number | null>(null)
+  const [outboxVersion, setOutboxVersion] = useState(0)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -214,32 +217,29 @@ export function RecordingPage() {
     if (!capture) return
     setState('uploading')
     setError('')
+    setProgress(null)
     const extension = extensionForMimeType(capture.blob.type)
     const filename = `${slugify(title)}.${extension}`
-    const pending = { ...capture, title, context, filename }
     try {
-      await savePendingCapture(pending)
-      const acknowledgement = await api.uploadRecording(
-        new File([capture.blob], filename, { type: capture.blob.type }),
-        runtime.mode === 'mobile',
-        {
-          recordedAt: capture.recordedAt,
-          context,
-          recordingType: 'other',
-          sourceProvider: capture.sourceProvider,
-          sourceTransport: capture.sourceTransport,
-          sourceRecordingId: capture.sourceRecordingId,
-          durationMs: capture.durationMs,
-        },
-      )
-      await removePendingCapture(capture.id)
+      // Keep the outbox row (transfer ID, retry history) and only refresh the edited fields.
+      let pending = await updateCapture(capture.id, { title, context, filename })
+      if (!pending) {
+        pending = { ...capture, title, context, filename }
+        await savePendingCapture(pending)
+      }
+      const acknowledgement = await deliverCapture(pending, runtime.mode === 'mobile', (sent, total) => setProgress(total ? sent / total : null))
+      // The local copy stays until the configured retention window; removal requires the verified acknowledgement.
+      await cleanupStoredCaptures().catch(() => 0)
       setState('stored')
       window.setTimeout(() => navigate(`/recording/${acknowledgement.recordingId}`, { replace: true }), 550)
     } catch (uploadError) {
       setState('review')
+      setOutboxVersion(v => v + 1)
       setError(uploadError instanceof Error
-        ? `Local recording retained. ${uploadError.message}`
-        : 'Local recording retained. Check the vault connection and retry.')
+        ? `Local recording retained in the outbox. ${uploadError.message}`
+        : 'Local recording retained in the outbox. Check the vault connection and retry.')
+    } finally {
+      setProgress(null)
     }
   }
 
@@ -283,6 +283,7 @@ export function RecordingPage() {
               {state === 'requesting' ? <Loader2 className="animate-spin" /> : <Mic />}
             </button>
             <div className="capture-import-option"><span>or</span><PlaudImportDialog variant="outline" /></div>
+            <OutboxPanel fromMobile={runtime.mode === 'mobile'} refreshKey={outboxVersion} />
           </div>
         ) : isCapturing ? (
           <div className="capture-live">
@@ -309,7 +310,7 @@ export function RecordingPage() {
             </div>
             <Button size="lg" className="capture-upload" onClick={() => void upload()} disabled={state === 'uploading' || !title.trim()}>
               {state === 'uploading' ? <Loader2 className="animate-spin" /> : <UploadCloud />}
-              {state === 'uploading' ? 'Storing in vault...' : 'Store in desktop vault'}
+              {state === 'uploading' ? progress !== null && progress < 1 ? `Sending ${Math.round(progress * 100)}%...` : 'Storing in vault...' : 'Store in desktop vault'}
             </Button>
             {error && <div className="capture-offline" role="alert"><WifiOff /><span>{error}</span></div>}
             <Button variant="ghost" onClick={() => void discard()} disabled={state === 'uploading'}><RotateCcw />Record again</Button>
