@@ -174,8 +174,8 @@ export interface BatchEstimate {
   wouldRun: number
   usesCloudProvider: boolean
   provider: string | null
-  /** Always null: providers price per second or per token, so a figure here would be invented. */
-  estimatedCost: null
+  /** AI-10 estimate from documented list prices; `totalUsd` is null when any price or duration is unknown. */
+  estimatedCost: import('./ai-settings').CostEstimate | null
 }
 
 export interface SearchResult {
@@ -640,7 +640,7 @@ export const api = {
     return res.data
   },
 
-  startBatch: async (recordingIds: string[], options: { retryOf?: string } = {}): Promise<BatchJob> => {
+  startBatch: async (recordingIds: string[], options: { retryOf?: string; confirmCost?: boolean } = {}): Promise<BatchJob> => {
     const res = await fetchJSON<ApiEnvelope<BatchJob>>('/recordings/batch', {
       method: 'POST', body: JSON.stringify({ recordingIds, confirm: true, ...options }), signal: AbortSignal.timeout(30000),
     })

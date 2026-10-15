@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertCircle, Check, Loader2, RotateCcw, Speech, X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { api, type BatchEstimate, type BatchJob, type Recording } from '@/lib/api'
+import { describeEstimate } from '@/lib/transcription'
 import './batch-transcribe.css'
 
 /**
@@ -24,6 +25,7 @@ export function BatchTranscribe({ recordings, onFinished }: {
   const [job, setJob] = useState<BatchJob | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [costAccepted, setCostAccepted] = useState(false)
   const mounted = useRef(true)
   const finished = useRef(onFinished)
   useEffect(() => { finished.current = onFinished }, [onFinished])
@@ -54,7 +56,7 @@ export function BatchTranscribe({ recordings, onFinished }: {
 
   const check = useCallback(async () => {
     setBusy(true); setError('')
-    try { setEstimate(await api.estimateBatch(candidates.map(row => row.id))) }
+    try { setEstimate(await api.estimateBatch(candidates.map(row => row.id))); setCostAccepted(false) }
     catch (failure) { fail(failure) }
     finally { if (mounted.current) setBusy(false) }
   }, [candidates])
@@ -63,7 +65,7 @@ export function BatchTranscribe({ recordings, onFinished }: {
     setBusy(true); setError('')
     try {
       const ids = retryOf ? [] : candidates.map(row => row.id)
-      setJob(await api.startBatch(ids, retryOf ? { retryOf } : {}))
+      setJob(await api.startBatch(ids, { ...(retryOf ? { retryOf } : {}), ...(costAccepted ? { confirmCost: true } : {}) }))
       setEstimate(null)
     } catch (failure) { fail(failure) }
     finally { if (mounted.current) setBusy(false) }
@@ -83,10 +85,17 @@ export function BatchTranscribe({ recordings, onFinished }: {
               <>
                 <span className="batch-confirm">
                   {estimate.usesCloudProvider
-                    ? `This sends ${estimate.wouldRun} recording${estimate.wouldRun === 1 ? '' : 's'} to ${estimate.provider}, which may be billed. Cost is not estimated here because ${estimate.provider} prices per second of audio.`
+                    ? `This sends ${estimate.wouldRun} recording${estimate.wouldRun === 1 ? '' : 's'} to ${estimate.provider}, which may be billed.`
                     : `This runs ${estimate.wouldRun} recording${estimate.wouldRun === 1 ? '' : 's'} locally with ${estimate.provider ?? 'the configured engine'}.`}
+                  {estimate.estimatedCost && ` ${describeEstimate(estimate.estimatedCost)}`}
                 </span>
-                <Button size="sm" disabled={busy} onClick={() => void start()}>
+                {estimate.estimatedCost?.confirmationRequired && (
+                  <label className="batch-confirm">
+                    <input type="checkbox" checked={costAccepted} disabled={busy} onChange={event => setCostAccepted(event.target.checked)} />
+                    {' '}{estimate.estimatedCost.reasons.join(' ')} I accept this estimated cost.
+                  </label>
+                )}
+                <Button size="sm" disabled={busy || Boolean(estimate.estimatedCost?.confirmationRequired && !costAccepted)} onClick={() => void start()}>
                   {busy ? <Loader2 className="batch-spin" /> : <Check />}Start
                 </Button>
                 <Button size="sm" variant="ghost" disabled={busy} onClick={() => setEstimate(null)}><X />Cancel</Button>

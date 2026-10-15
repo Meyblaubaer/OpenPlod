@@ -42,8 +42,10 @@ export interface TranscriptVersionDetail extends TranscriptVersionSummary { full
 export interface TranscriptVersionBacklinks { version: TranscriptVersionSummary; documents: NoteSummary[] }
 export interface DocumentGeneration {
   id: string; recordingId: string; versionId: string | null; state: 'pending' | 'ready' | 'failed';
-  provider: 'mistral' | 'openai' | 'anthropic' | 'ollama'; model: string; title: string; content: string | null;
+  provider: import('../ai/config').TextProvider; model: string; title: string; content: string | null;
   createdAt: string; documentId: string | null; steps: { stage: string; at: string }[];
+  /** Who actually answered, reported usage and timing (AI-09); null for generations made before 1.1. */
+  provenance: import('../ai/text').TextProvenance | null;
 }
 export interface NoteVersion { id: string; revision: number; title: string; content: string; createdAt: string }
 export interface NotePage { documents: NoteSummary[]; total: number; offset: number; limit: number }

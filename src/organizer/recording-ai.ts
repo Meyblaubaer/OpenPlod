@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { OrganizerError, OrganizerStore } from './store';
-import { textSelection } from '../ai/config';
+import { textSelection, textProviders } from '../ai/config';
 import { completeText, TextProviderError } from '../ai/text';
 
 const id = z.string().uuid();
@@ -10,7 +10,7 @@ export const conversationUpdateSchema = z.object({
   archived: z.boolean().optional(),
 }).strict().refine(value => value.title !== undefined || value.archived !== undefined, 'Change the title or archive state');
 export const conversationListSchema = z.object({ archived: z.enum(['true', 'false']).default('false') }).strict();
-export const questionSchema = z.object({ id: id, conversationId: id, recordingIds: z.array(id).min(1).max(12), question: z.string().trim().min(1).max(4000), consent: z.literal(true), expectedProvider: z.enum(['mistral', 'openai', 'anthropic', 'ollama']).optional() }).strict();
+export const questionSchema = z.object({ id: id, conversationId: id, recordingIds: z.array(id).min(1).max(12), question: z.string().trim().min(1).max(4000), consent: z.literal(true), expectedProvider: z.enum(textProviders).optional() }).strict();
 import type { AiSource, AiAnswer, AiConversationSummary } from './recording-ai-types';
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 export const normalizeSourceReferences = (text: string) => text.replace(/\[(S\d+(?:\s*,\s*S\d+)+)\]/g, (_match, ids: string) => ids.split(',').map(value => `[${value.trim()}]`).join(' '));
@@ -18,10 +18,8 @@ const failure = (status: 400 | 404 | 409 | 413 | 503, code: string, message: str
 
 export class RecordingAi {
   private running = new Set<string>();
-  constructor(private store: OrganizerStore, private fetcher: typeof fetch = fetch, private key = () => {
-    const row = store.database.query("SELECT value FROM user_settings WHERE key='mistralApiKey'").get() as { value: string } | null;
-    return row?.value || process.env.MISTRAL_API_KEY;
-  }) {
+  /** `key` is an optional legacy Mistral key source; by default keys come from shared AI settings (AI-11). */
+  constructor(private store: OrganizerStore, private fetcher: typeof fetch = fetch, private key?: () => string | undefined) {
     store.database.exec(`CREATE TABLE IF NOT EXISTS ai_turns (
       id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, request_hash TEXT NOT NULL, recording_ids TEXT NOT NULL,
       question TEXT NOT NULL, state TEXT NOT NULL, result TEXT, created_at TEXT NOT NULL);
@@ -197,7 +195,7 @@ export class RecordingAi {
       this.active(data.recordingIds); signal?.throwIfAborted();
       await step('saved');
       const result: AiAnswer = { id: data.id, conversationId: data.conversationId, question: data.question, ...answer, sources,
-        provider: response.provider, model: response.model, usage: response.usage, createdAt, trace };
+        provider: response.provider, model: response.model, usage: response.usage, startedAt: response.startedAt ?? null, completedAt: response.completedAt ?? null, fallbackFrom: response.fallbackFrom ?? [], createdAt, trace };
       this.store.database.query("UPDATE ai_turns SET state='ready',result=? WHERE id=?").run(JSON.stringify(result), data.id);
       // A follow-up question brings an archived conversation back to the main list.
       this.store.database.query('UPDATE ai_conversations SET archived_at=NULL, updated_at=? WHERE id=? AND archived_at IS NOT NULL').run(new Date().toISOString(), data.conversationId);

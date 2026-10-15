@@ -67,7 +67,7 @@ export function initializeTranscriptionProfiles(database: Database) {
 function checkCombination(profile: ProfileInput) {
   if (profile.model && !profile.engine) throw new ProfileError(400, 'Choose a provider before choosing a model.');
   if (profile.engine) {
-    try { validateSpeechOptions(profile.engine, { model: profile.model ?? undefined, diarize: profile.diarize ?? undefined, vocabulary: profile.vocabulary, prompt: profile.prompt }); }
+    try { validateSpeechOptions(profile.engine, { model: profile.model ?? undefined, diarize: profile.diarize ?? undefined, vocabulary: profile.vocabulary, prompt: profile.prompt, language: profile.language ?? undefined }); }
     catch (error) { throw new ProfileError(400, (error as Error).message); }
   }
 }

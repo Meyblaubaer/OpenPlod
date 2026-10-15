@@ -1,0 +1,70 @@
+import type { Database } from 'bun:sqlite';
+import { isLocalProvider, type AiConfig } from '../ai/config';
+import { speechCapabilities, timestampGranularity } from '../ai/capabilities';
+import { costGate, estimateTranscription, recordingCostInput, recordSpend, settleSpend } from '../ai/spending';
+import { chunkPlan, ffmpegSplitter, transcribeChunks, type AudioSplitter, type LongCheckpoint } from './long-audio';
+import { transcriptionFailure } from './openai';
+import type { TranscriptionRouter } from './router';
+import type { TranscriptionOptions, TranscriptionResult } from './types';
+
+export interface TranscriptionRun {
+  jobId: string; recordingId: string; filePath: string;
+  /** The effective configuration (profile already applied). */
+  config: AiConfig; options: TranscriptionOptions;
+  /** The user confirmed this job's cost estimate when it was queued. */
+  costConfirmed?: boolean;
+  signal: AbortSignal; checkpoint?: LongCheckpoint; saveCheckpoint: (checkpoint: LongCheckpoint) => void;
+}
+export class CostConfirmationError extends Error {}
+
+/**
+ * One recording's transcription for the job queue: cost gate and ledger (AI-10),
+ * then either the whole file through the router, or the chunked path (AI-08)
+ * when the provider's size limit or the configured duration requires it.
+ * Checkpoints say whether a remote submission may be in flight (`inFlight`), so
+ * the queue only restarts or retries work that is known not to be outstanding.
+ */
+export async function runTranscription(database: Database, router: TranscriptionRouter, run: TranscriptionRun, splitter: AudioSplitter = ffmpegSplitter): Promise<TranscriptionResult> {
+  const { config, options, signal, checkpoint } = run, provider = config.transcriptionEngine;
+  const stored = recordingCostInput(database, run.recordingId);
+  let fileBytes = stored.fileBytes;
+  try { const size = Bun.file(run.filePath).size; if (size > 0) fileBytes = size; } catch { /* keep the stored size */ }
+  const maxBytes = speechCapabilities[provider].maxBytes, tooLarge = maxBytes !== null && fileBytes !== null && fileBytes > maxBytes;
+  const chainLocal = [provider, ...config.transcriptionFallback].every(name => isLocalProvider(config, name));
+  const resumedPlan = checkpoint?.chunks?.plan.at(-1);
+  let duration = resumedPlan ? resumedPlan.start + resumedPlan.duration : stored.durationSeconds;
+  const needsDuration = tooLarge || config.transcriptionChunkAboveMinutes > 0 || (!chainLocal && (config.monthlyBudgetUsd !== null || config.confirmAboveUsd !== null));
+  if (duration === null && needsDuration) duration = await splitter.probe(run.filePath, signal);
+  const estimate = estimateTranscription(config, { durationSeconds: duration, fileBytes, model: options.model ?? null, diarize: options.diarize });
+  const resuming = Boolean(checkpoint?.remoteId || checkpoint?.chunks?.results.length);
+  if (!resuming && !run.costConfirmed) {
+    const gate = costGate(database, estimate.usd, estimate.local);
+    if (gate.required) throw new CostConfirmationError(`Cost confirmation required: ${gate.reasons.join(' ')} Nothing was sent. Start this transcription again and confirm the estimate.`);
+  }
+  const ledgerId = `transcription:${run.jobId}`;
+  if (!estimate.local) recordSpend(database, { id: ledgerId, jobId: run.jobId, task: 'transcription', provider, model: estimate.model, estimatedUsd: estimate.usd, basis: estimate.usd === null ? 'unknown' : 'audio-seconds', units: estimate.billedSeconds, usage: null, status: 'estimated' });
+  let everSent = Boolean(checkpoint?.inFlight || checkpoint?.remoteId || checkpoint?.chunks?.results.length);
+  const save = (next: LongCheckpoint) => { if (next.inFlight) everSent = true; run.saveCheckpoint(next); };
+  const settle = (status: 'complete' | 'failed' | 'cancelled', usage: Record<string, number> | null = null) => {
+    if (!estimate.local) settleSpend(database, ledgerId, status !== 'complete' && !everSent ? 'not-sent' : status, usage);
+  };
+  try {
+    const plan = chunkPlan(provider, { durationSeconds: duration, fileBytes, chunkAboveMinutes: config.transcriptionChunkAboveMinutes });
+    let result: TranscriptionResult;
+    if (!plan && tooLarge) result = transcriptionFailure('router', `This file exceeds ${speechCapabilities[provider].label}'s ${Math.round(maxBytes! / 1_000_000)} MB limit and its duration could not be read, so it cannot be split. Nothing was sent.`);
+    else if (plan && options.diarize) result = transcriptionFailure('router', 'Speaker labels cannot be kept consistent across audio chunks. Turn off speaker labels for this long recording, or choose a provider that accepts the whole file. Nothing was sent.');
+    else if (plan && timestampGranularity(provider, options.model, options.diarize) === 'none') result = transcriptionFailure('router', `${speechCapabilities[provider].label}${options.model ? ` ${options.model}` : ''} returns no timestamps, so a long recording cannot be split and merged without duplicating speech. Choose a model with segment timestamps. Nothing was sent.`);
+    else if (plan) {
+      const single = router.primaryOnly();
+      result = await transcribeChunks((path, opts) => single.transcribeFile(path, opts), run.filePath, plan, duration!, { ...options, signal, checkpoint, save, local: isLocalProvider(config, provider), provider }, splitter);
+    } else {
+      result = await router.transcribeFile(run.filePath, { ...options, signal, checkpoint, onCheckpoint: next => save({ ...next, inFlight: !chainLocal }) });
+    }
+    signal.throwIfAborted();
+    settle(result.success ? 'complete' : 'failed', result.success ? (result.metadata?.usage as Record<string, number> | null | undefined) ?? null : null);
+    return result;
+  } catch (error) {
+    settle(signal.aborted ? 'cancelled' : 'failed');
+    throw error;
+  }
+}
