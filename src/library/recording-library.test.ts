@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
@@ -18,6 +18,7 @@ const { initializeDatabase } = await import('../db/setup');
 const { recordings, transcripts, transcriptVersions } = await import('../db/schema');
 const {
   importRecordingFile,
+  purgeRecording,
   purgeExpiredTrash,
   restoreRecording,
   softDeleteRecording,
@@ -314,6 +315,43 @@ function uploadPlaud(input: { content: string; fingerprint: string; sourceId: st
     method: 'POST', headers: { 'X-OpenPlod-Token': 'test-pairing-token' }, body,
   });
 }
+
+describe('atomic import and complete purge (REL-03, REL-04)', () => {
+test('sidecars are committed with the recording and the journal is cleared', async () => {
+  const source = join(testRoot, 'atomic-source.m4a'), device = join(testRoot, 'atomic-device.plaud');
+  writeFileSync(source, `atomic-${Date.now()}`); writeFileSync(device, 'device bytes');
+  const sidecars = [{ name: 'device-original.plaud', sourcePath: device }, { name: 'provenance.json', data: '{"ok":true}' }];
+  const result = await importRecordingFile({ sourcePath: source, provenance: { sourceProvider: 'plaud', sourceTransport: 'ble', sourceRecordingId: `SN9:${Date.now()}` }, sidecars });
+  expect(result.added).toBe(true);
+  const originals = join(testRoot, 'vault', 'originals', result.recording.id);
+  expect(readFileSync(join(originals, 'device-original.plaud'), 'utf8')).toBe('device bytes');
+  expect(readFileSync(join(originals, 'provenance.json'), 'utf8')).toBe('{"ok":true}');
+  expect(sqlite.query('SELECT count(*) AS n FROM import_journal').get()).toEqual({ n: 0 });
+  expect(readdirSync(join(testRoot, 'vault', '.staging'))).toEqual([]);
+  // A duplicate import never replaces existing evidence.
+  writeFileSync(device, 'different');
+  const again = await importRecordingFile({ sourcePath: source, provenance: { sourceProvider: 'plaud', sourceTransport: 'ble' }, sidecars });
+  expect(again.added).toBe(false);
+  expect(readFileSync(join(originals, 'device-original.plaud'), 'utf8')).toBe('device bytes');
+
+  expect(await softDeleteRecording(result.recording.id)).toBe(true);
+  expect(await purgeRecording(result.recording.id)).toBe(true);
+  expect(existsSync(originals)).toBe(false);
+  expect(existsSync(result.recording.filePath)).toBe(false);
+  expect(sqlite.query('SELECT reason FROM recording_purges WHERE recording_id=?').get(result.recording.id)).toEqual({ reason: 'manual' });
+});
+
+test('a failed import leaves no partial vault files and keeps the source', async () => {
+  const source = join(testRoot, 'atomic-bad.m4a');
+  writeFileSync(source, `bad-${Date.now()}`);
+  await expect(importRecordingFile({ sourcePath: source, provenance: { sourceProvider: 'upload', sourceTransport: 'upload' },
+    sidecars: [{ name: '../escape', data: 'x' }] })).rejects.toThrow('Invalid sidecar name');
+  expect(existsSync(source)).toBe(true);
+  const files = readdirSync(join(testRoot, 'vault')).filter(name => name.endsWith('.m4a'));
+  expect(sqlite.query('SELECT count(*) AS n FROM import_journal').get()).toEqual({ n: 0 });
+  expect(files.every(name => sqlite.query('SELECT 1 FROM recordings WHERE file_path=?').get(join(testRoot, 'vault', name)))).toBe(true);
+});
+});
 
 function restoreEnv(name: string, value: string | undefined) {
   if (value === undefined) delete process.env[name];

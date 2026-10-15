@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { protectSetting } from '../vault/secrets';
 import { z } from 'zod';
 import type { Database } from 'bun:sqlite';
 import { aiSettingsInput, aiConfigSchema, readAiConfig, credential, secretNames, assertPrivacy, textProviders, textModels, customEndpoint, isLocalProvider } from '../ai/config';
@@ -33,7 +34,7 @@ export function createAiSettingsApi(database: Database, fetcher: typeof fetch = 
     database.transaction(() => {
       const put = database.query("INSERT INTO user_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=datetime('now')");
       put.run('aiConfig', JSON.stringify(config)); put.run('transcriptionEngine', config.transcriptionEngine);
-      for (const [key, value] of Object.entries(credentials || {})) if (typeof value === 'string') put.run(key, value);
+      for (const [key, value] of Object.entries(credentials || {})) if (typeof value === 'string') put.run(key, protectSetting(key, value));
     })();
     return c.json({ success: true });
   });

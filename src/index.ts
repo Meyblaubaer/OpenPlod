@@ -5,7 +5,10 @@
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { logger } from 'hono/logger';
+import { redactingLogger } from './vault/redacting-logger';
+import { prepareVault, tlsOptions } from './vault/startup';
+import { protectSetting } from './vault/secrets';
+import { createVaultApi } from './api/vault';
 import { serveStatic } from 'hono/bun';
 import { initializeDatabase } from './db/setup';
 import recordingsApi from './api/recordings';
@@ -46,6 +49,7 @@ import packageInfo from '../package.json';
 // ============================================
 
 initializeDatabase();
+await prepareVault(sqlite);
 
 console.log('[DB] Tables ready');
 
@@ -80,8 +84,7 @@ jobQueue.register('process-recording', async (data: any, job) => {
 
   await db.update(recordings).set({ status: 'transcribing' }).where(eq(recordings.id, recordingId));
 
-  const savedSettings = await db.select().from(userSettings);
-  const settings = Object.fromEntries(savedSettings.map(setting => [setting.key, setting.value]));
+  const settings = readSettings(sqlite);
   const primary = config.transcriptionEngine;
   const router = new TranscriptionRouter(
     { primary, fallback: config.transcriptionFallback, localOnly: currentConfig.privacyMode === 'local-only' || config.privacyMode === 'local-only', beforeAttempt: provider => assertPrivacy(readAiConfig(sqlite), provider) },
@@ -160,7 +163,7 @@ app.use('*', cors({
   allowHeaders: ['Content-Type', 'Content-Range', 'Range', 'X-Chunk-SHA256', 'X-OpenPlod-Token'],
   exposeHeaders: ['Accept-Ranges', 'Content-Length', 'Content-Range', 'Upload-Offset'],
 }));
-app.use('*', logger());
+app.use('*', redactingLogger());
 app.use('/api/*', apiAccess);
 
 // Health/info
@@ -186,6 +189,7 @@ app.route('/api/v1/automations', automation.automationsApi);
 app.route('/api/v1', createOrganizerApi(organizer));
 app.route('/api/ai', createRecordingAiApi(new RecordingAi(organizer)));
 app.route('/api/ai-settings', createAiSettingsApi(sqlite));
+app.route('/api/vault', createVaultApi(sqlite));
 app.route('/api/onboarding', createOnboardingApi(sqlite, () => new TranscriptionRouter({}, readSettings(sqlite)).status()));
 
 // Settings
@@ -239,8 +243,9 @@ app.put('/api/settings/:key', async (c) => {
     config.transcriptionModel = ''; config.transcriptionDiarize = false; config.transcriptionVocabulary = []; config.transcriptionPrompt = '';
     await db.insert(userSettings).values({ key: 'aiConfig', value: JSON.stringify(config) }).onConflictDoUpdate({ target: userSettings.key, set: { value: JSON.stringify(config) } });
   }
-  await db.insert(userSettings).values({ key, value: String(value) })
-    .onConflictDoUpdate({ target: userSettings.key, set: { value: String(value), updatedAt: new Date().toISOString() } });
+  const stored = protectSetting(key, String(value));
+  await db.insert(userSettings).values({ key, value: stored })
+    .onConflictDoUpdate({ target: userSettings.key, set: { value: stored, updatedAt: new Date().toISOString() } });
   return c.json({ success: true });
 });
 
@@ -303,11 +308,14 @@ setInterval(purgeTrash, 6 * 3600 * 1000).unref();
 
 const port = parseInt(process.env.PORT || '3487', 10);
 const hostname = process.env.HOST || '127.0.0.1';
-console.log(`[PlaudApp] Starting on http://${hostname}:${port}`);
+const tls = tlsOptions();
+console.log(`[PlaudApp] Starting on ${tls.tls ? 'https' : 'http'}://${hostname}:${port}`);
+if (!tls.tls && !['127.0.0.1', 'localhost', '::1'].includes(hostname)) console.warn('[Security] Plain HTTP on a non-loopback address: pairing tokens and audio are not encrypted in transit. Set OPENPLOD_TLS_CERT/OPENPLOD_TLS_KEY.');
 
 export default {
   port,
   hostname,
+  ...tls,
   // Bluetooth discovery can take up to 35 seconds before returning a result.
   idleTimeout: 60,
   fetch: app.fetch,

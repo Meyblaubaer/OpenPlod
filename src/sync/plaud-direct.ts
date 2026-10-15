@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { chmod, copyFile, mkdir, mkdtemp, open, readFile, stat, unlink, writeFile, rmdir } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rename, stat, unlink, writeFile, rmdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { PlaudConnection, type PlaudIdentity } from './plaud-connection';
 import { PlaudTransport } from './plaud-transport';
@@ -7,6 +7,8 @@ import { decodePlaudAudio } from './plaud-audio';
 import { downloadPlaudSession, listPlaudSessions, recordingHandshake } from './plaud-transfer';
 import { fingerprintFile, importRecordingFile } from '../library/recording-library';
 import { openPlaudCheckpoint } from './plaud-checkpoint';
+import { evaluateTailChecksum, TransferChecksumMismatch } from './transfer-checksum';
+import { ensureDiskSpace, fsyncDirectory } from '../library/durable-files';
 import { bluetoothSupported, isBluetoothIdentifier, isDesktopPlatform } from './plaud-bridge';
 import { BINDING_TOKEN_PATTERN, PLAUD_SERIAL_PATTERN, identityFilePath } from './plaud-provision';
 
@@ -67,13 +69,6 @@ export async function readDirectPlaudRecordings() {
     sessions: await listPlaudSessions(connection), checkedAt: new Date().toISOString() }));
 }
 
-async function durableCopy(source: string, destination: string) {
-  await copyFile(source, destination);
-  await chmod(destination, 0o600);
-  const file = await open(destination, 'r+');
-  try { await file.sync(); } finally { await file.close(); }
-}
-
 async function runAudioTool(command: string[]) {
   const child = Bun.spawn(command, { stdout: 'pipe', stderr: 'ignore' });
   const timer = setTimeout(() => child.kill(), 45000);
@@ -98,6 +93,16 @@ export async function importDirectPlaudRecording(sessionId: number) {
     const checkpoint = await openPlaudCheckpoint(resumePath, prefix.length);
     const downloaded = await downloadPlaudSession(connection, selected, { prefix, checkpoint: bytes => checkpoint.save(bytes) })
       .finally(() => checkpoint.close());
+    // REL-02: the tail algorithm is unconfirmed, so this records evidence and only a confirmed
+    // algorithm can reject. A rejected transfer keeps its bytes in quarantine for inspection.
+    const tailChecksum = evaluateTailChecksum(downloaded.bytes, downloaded.tailCrc);
+    if (tailChecksum.status === 'mismatch') {
+      const quarantine = join(vaultRoot(), 'incoming', 'plaud-quarantine');
+      await mkdir(quarantine, { recursive: true, mode: 0o700 });
+      await rename(resumePath, join(quarantine, `${identity.serial}-${sessionId}-${selected.size}-${Date.now()}.part`)).catch(() => undefined);
+      await fsyncDirectory(quarantine);
+      throw new TransferChecksumMismatch(tailChecksum);
+    }
     const decoded = await decodePlaudAudio(downloaded.bytes, async ciphertext => {
       const reply = await connection.transport.request('rsa-decrypt', { key: identity.privateKey, data: ciphertext.toString('base64') });
       return Buffer.from(reply.data ?? '', 'base64');
@@ -105,6 +110,8 @@ export async function importDirectPlaudRecording(sessionId: number) {
     const retained = await listPlaudSessions(connection);
     if (!retained.some(session => session.sessionId === selected.sessionId && session.size === selected.size)) throw new Error('Source retention could not be confirmed');
     await mkdir(join(vaultRoot(), 'incoming'), { recursive: true, mode: 0o700 });
+    // Temporary device bytes, decoded Ogg and M4A, then their vault copies.
+    await ensureDiskSpace(join(vaultRoot(), 'incoming'), (downloaded.bytes.length + decoded.audio.length) * 4);
     const temporary = await mkdtemp(join(vaultRoot(), 'incoming', 'plaud-'));
     const encryptedPath = join(temporary, 'original.plaud'), oggPath = join(temporary, 'audio.ogg'), playbackPath = join(temporary, 'audio.m4a');
     try {
@@ -115,29 +122,29 @@ export async function importDirectPlaudRecording(sessionId: number) {
       const duration = Number(probe.format?.duration);
       if (!Number.isFinite(duration) || duration <= 0) throw new Error('Decoded Plaud recording has no playable duration');
       signal.throwIfAborted();
+      const durationMs = Math.round(duration * 1000);
+      const provenance = JSON.stringify({
+        serial: identity.serial, session: selected, sourceTransport: 'ble', sourceRetained: true,
+        originalSha256: await fingerprintFile(encryptedPath), integrity: decoded.integrity,
+        tailCrc: downloaded.tailCrc, tailChecksum, durationMs, downloadedAt: new Date().toISOString(),
+      });
+      // Device bytes, decoded audio and provenance are staged with the playback copy and become
+      // visible together with the recording row (REL-03).
       const result = await importRecordingFile({ sourcePath: playbackPath, originalFilename: `Plaud-${sessionId}.m4a`,
         provenance: { sourceProvider: 'plaud', sourceTransport: 'ble', sourceRecordingId: `${identity.serial}:${sessionId}` },
-        metadata: { durationMs: Math.round(duration * 1000) } });
-      const originalDirectory = join(dirname(result.recording.filePath), 'originals', result.recording.id);
-      await mkdir(originalDirectory, { recursive: true, mode: 0o700 });
-      // Import idempotency must not replace original evidence on a duplicate request.
-      if (!existsSync(join(originalDirectory, 'device-original.plaud'))) {
-        await durableCopy(encryptedPath, join(originalDirectory, 'device-original.plaud'));
-        await durableCopy(oggPath, join(originalDirectory, 'decoded-original.ogg'));
-        await writeFile(join(originalDirectory, 'provenance.json'), JSON.stringify({
-          serial: identity.serial, session: selected, sourceTransport: 'ble', sourceRetained: true,
-          originalSha256: await fingerprintFile(encryptedPath), integrity: decoded.integrity,
-          tailCrc: downloaded.tailCrc, tailChecksumValidated: false, durationMs: Math.round(duration * 1000),
-          downloadedAt: new Date().toISOString(),
-        }), { mode: 0o600 });
-      }
+        metadata: { durationMs },
+        sidecars: [
+          { name: 'device-original.plaud', sourcePath: encryptedPath },
+          { name: 'decoded-original.ogg', sourcePath: oggPath },
+          { name: 'provenance.json', data: provenance },
+        ] });
       await unlink(resumePath).catch(() => undefined);
       // Like every other import path, honour "Transcribe after import" (or forwarding) for new recordings.
       // Imported lazily: the job queue opens the vault database on load.
       if (result.added) await import('../library/processing')
         .then(({ queueRecordingProcessing }) => queueRecordingProcessing({ recordingId: result.recording.id, filePath: result.recording.filePath }))
         .catch(error => console.error('[Plaud] Imported recording could not be queued for processing:', error));
-      return { ...result, durationMs: Math.round(duration * 1000), sourceRetained: true };
+      return { ...result, durationMs, sourceRetained: true };
     } finally {
       for (const path of [encryptedPath, oggPath, playbackPath]) await unlink(path).catch(() => undefined);
       await rmdir(temporary).catch(() => undefined);
