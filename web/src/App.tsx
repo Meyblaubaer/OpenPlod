@@ -4,6 +4,7 @@ import { Layout } from '@/components/Layout'
 import { Loader2 } from "@/components/icons"
 import { RuntimeGate } from '@/components/RuntimeGate'
 import { SharedAudioRouter } from '@/components/SharedAudioRouter'
+import { useLocale } from '@/i18n'
 
 const DevicesPage = lazy(() => import('@/pages/DevicesPage').then(module => ({ default: module.DevicesPage })))
 
@@ -28,9 +29,11 @@ function PageFallback() {
 }
 
 export default function App() {
+  // Remount on a language change so every t() call re-renders in the new language.
+  const locale = useLocale()
   return (
     <RuntimeGate>
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter key={locale} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <SharedAudioRouter />
         <Suspense fallback={<PageFallback />}>
           <Routes>
