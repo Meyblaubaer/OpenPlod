@@ -23,7 +23,7 @@ import {
   writeStoredCloudToken, type PlaudCloudRecording,
 } from '../sync/plaud-cloud';
 import {
-  DEFAULT_PLAUD_DOMAIN, PLAUD_DOMAINS, PlaudIdentityProvisioner, clearStoredIdentity, deviceTypeForSerial,
+  DEFAULT_PLAUD_DOMAIN, PLAUD_DOMAINS, PLAUD_SERIAL_PATTERN, PlaudIdentityProvisioner, clearStoredIdentity, deviceTypeForSerial,
   identityFilePath, isPlaudDomain, provisionWithDeveloperCredentials, readStoredIdentity, writeStoredIdentity,
   type ProvisionedIdentity,
 } from '../sync/plaud-provision';
@@ -389,7 +389,7 @@ app.get('/identity', async c => {
     authorized: Boolean(identity) && directPlaudConfigured(),
     serial: identity?.serial ?? null,
     identifier: identity?.identifier ?? null,
-    deviceType: identity && /^[0-9A-F]{16}$/.test(identity.serial) ? deviceTypeForSerial(identity.serial) : null,
+    deviceType: identity && PLAUD_SERIAL_PATTERN.test(identity.serial) ? deviceTypeForSerial(identity.serial) : null,
     developerCredentialsAvailable: Boolean(credentials.clientId && credentials.clientSecret),
     domains: PLAUD_DOMAINS,
     identityPath: identityFilePath(),
@@ -403,7 +403,7 @@ app.post('/identity', async c => {
   try { body = await c.req.json(); }
   catch { return c.json({ success: false, error: 'Invalid authorization request.' }, 400); }
   try {
-    const givenSerial = typeof body.serial === 'string' && /^[0-9A-F]{16}$/.test(body.serial) ? body.serial : null;
+    const givenSerial = typeof body.serial === 'string' && PLAUD_SERIAL_PATTERN.test(body.serial) ? body.serial : null;
     const givenIdentifier = typeof body.identifier === 'string' && isBluetoothIdentifier(body.identifier) ? body.identifier : null;
     // The serial and Bluetooth address come from the recorder's advertisement, so
     // probe for them instead of making the user type hardware identifiers.
