@@ -483,6 +483,10 @@ app.get('/status', async c => {
       connectionVerified: device.connectionVerified,
       deviceIdentifier: device.identifier,
       deviceSerial: device.serial,
+      // Model as resolved from the serial prefix, so the UI can name the recorder
+      // instead of assuming a Note Pro.
+      deviceModel: device.serial && PLAUD_SERIAL_PATTERN.test(device.serial)
+        ? deviceTypeForSerial(device.serial) : null,
       protocolVersion: device.protocolVersion,
       directTransferAvailable: directPlaudConfigured(),
       cloudLinked,
